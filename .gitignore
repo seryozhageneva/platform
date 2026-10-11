@@ -1,0 +1,43 @@
+# Секреты: ключи и пароли никогда не попадают в репозиторий
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node / фронтенд
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+
+# Папки сборки
+dist/
+build/
+out/
+.vite/
+
+# macOS
+.DS_Store
+
+# Редакторы
+.idea/
+.vscode/
+
+# Личные настройки Claude Code (общие настройки в .claude/settings.json коммитятся)
+.claude/settings.local.json
+
+# Логи и временные файлы
+*.log
+tmp/
