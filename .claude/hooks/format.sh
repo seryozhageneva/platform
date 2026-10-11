@@ -4,7 +4,7 @@
 # Если нужного инструмента ещё нет (до задачи 01) — молча выходит.
 # Если линтер нашёл ошибки, которые не смог исправить сам, — сообщает о них Claude (код выхода 2).
 
-f=$(jq -r '.tool_response.filePath // .tool_input.file_path // empty' 2>/dev/null)
+f=$(jq -r '.tool_input.file_path // (.tool_response | objects | .filePath) // empty' 2>/dev/null)
 [ -n "$f" ] && [ -f "$f" ] || exit 0
 
 root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"

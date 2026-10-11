@@ -17,12 +17,17 @@
       "Read(**/.env)",
       "Read(**/.env.local)",
       "Read(**/.env.prod*)",
+      "Read(**/.env.dev*)",
+      "Read(**/.env.test*)",
+      "Read(**/.env.stag*)",
       "Bash(cat *.env)",
       "Bash(cat *.env *)",
       "Bash(rm -rf *)",
       "Bash(rm -fr *)",
       "Bash(rm -Rf *)",
       "Bash(rm -r -f *)",
+      "Bash(rm -f -r *)",
+      "Bash(rm --recursive *)",
       "Bash(sudo rm *)"
     ]
   },

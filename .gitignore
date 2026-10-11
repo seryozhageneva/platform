@@ -38,6 +38,15 @@ out/
 # Личные настройки Claude Code (общие настройки в .claude/settings.json коммитятся)
 .claude/settings.local.json
 
+# Копии репозитория для параллельных сессий Claude Code
+.claude/worktrees/
+
+# Данные учеников и пилота: репозиторий публичный, сюда они не попадают никогда
+experiments/raw/
+uploads/
+backups/
+*.dump
+
 # Логи и временные файлы
 *.log
 tmp/
