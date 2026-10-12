@@ -1,0 +1,68 @@
+# Правила «кто кого может подключать» (ADR 0003). Проверка: uv run lint-imports
+# Смысл: части платформы знают друг о друге только через контракты в backend/core/contracts/.
+
+[importlinter]
+root_packages =
+    backend
+    blocks
+    mcp_servers
+    services
+
+[importlinter:contract:blocks-see-only-contracts]
+name = 1. Блоки видят только контракты
+type = forbidden
+source_modules =
+    blocks
+forbidden_modules =
+    backend
+    mcp_servers
+    services
+# Единственное исключение из запрета — сами контракты.
+ignore_imports =
+    blocks.** -> backend.core.contracts
+    blocks.** -> backend.core.contracts.**
+unmatched_ignore_imports_alerting = none
+
+[importlinter:contract:backend-knows-no-plugins]
+name = 2. Бэкенд не подключает блоки, адаптеры и сервисы
+type = forbidden
+source_modules =
+    backend
+forbidden_modules =
+    blocks
+    mcp_servers
+    services
+
+[importlinter:contract:contracts-are-the-base]
+name = 3. Контракты не подключают ничего другого из проекта
+type = forbidden
+source_modules =
+    backend.core.contracts
+# Звёздочка — «любая соседняя папка»: правило само распространится на движок, реестр
+# и валидатор, когда они появятся. Сами контракты из-под запрета исключаются автоматически.
+forbidden_modules =
+    backend.*
+    backend.core.*
+    blocks
+    mcp_servers
+    services
+
+[importlinter:contract:adapters-see-only-contracts]
+name = 4. Адаптеры и сервисы видят только контракты
+type = forbidden
+source_modules =
+    mcp_servers
+    services
+# Адаптеры и сервисы стоят и в запрещённых: друг друга они тоже не подключают.
+# Пара «пакет — он сам» при проверке пропускается.
+forbidden_modules =
+    backend
+    blocks
+    mcp_servers
+    services
+ignore_imports =
+    mcp_servers.** -> backend.core.contracts
+    mcp_servers.** -> backend.core.contracts.**
+    services.** -> backend.core.contracts
+    services.** -> backend.core.contracts.**
+unmatched_ignore_imports_alerting = none
