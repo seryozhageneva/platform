@@ -118,6 +118,7 @@ def test_output_the_database_rejects_stops_the_run(sessions, teacher, blocks, pi
         assert row.status == RunStatus.ERROR
         assert row.state["current"] == ["upper"]
         assert sorted(row.state["ports"]) == ["make", "start"]
+        assert row.state["write_order"] == ["start.event", "make.text"]
 
         state = await Engine(PgRunStore(sessions), blocks).resume(pipeline, run_id)
         assert state.status is RunStatus.DONE

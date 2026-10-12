@@ -173,6 +173,19 @@ def test_state_is_saved_after_every_node(store, blocks, pipeline):
     ]
 
 
+def test_engine_keeps_the_order_in_which_outputs_were_written(store, blocks, pipeline):
+    state = start(Engine(store, blocks), pipeline)
+
+    assert state.write_order == ["start.event", "make.text", "upper.text", "keep.report"]
+    assert [saved.write_order[-1] for saved in store.saved] == [
+        "start.event",
+        "make.text",
+        "upper.text",
+        "keep.report",
+    ]
+    assert asyncio.run(store.load("run-1")).write_order == state.write_order
+
+
 def test_journal_keeps_block_and_engine_events_in_order(store, blocks, pipeline):
     start(Engine(store, blocks), pipeline)
 
@@ -263,6 +276,7 @@ def test_failed_block_stops_the_run(store, blocks, pipeline, calls):
     # Запуск стоит на упавшем узле; то, что получено до него, не потеряно.
     assert state.current == ["upper"]
     assert state.ports["make"] == {"text": {"text": "привет"}}
+    assert state.write_order == ["start.event", "make.text"]
     assert nodes_called(calls) == ["make"]
     assert store.journal[-1] == ("upper", "node_failed", {"error": reason})
     assert asyncio.run(store.load("run-1")) == state
@@ -292,6 +306,7 @@ def test_run_continues_after_a_server_restart(store, blocks, pipeline, calls):
         params={"phrase": "привет"},
         current=["upper"],
         ports={"make": {"text": {"text": "привет"}}},
+        write_order=["make.text"],
     )
     asyncio.run(store.save(interrupted))
 
@@ -299,6 +314,7 @@ def test_run_continues_after_a_server_restart(store, blocks, pipeline, calls):
 
     assert state.status is RunStatus.DONE
     assert state.ports["keep"]["report"] == {"text": "ПРИВЕТ", "length": 6}
+    assert state.write_order == ["make.text", "upper.text", "keep.report"]
     assert nodes_called(calls) == ["upper", "keep"]
 
 
@@ -324,6 +340,7 @@ def test_state_that_cannot_be_saved_stops_the_run(store, blocks, pipeline, calls
     assert state.error == ("узел «upper»: не удалось сохранить состояние после узла (RuntimeError)")
     # Шаг отменён: запуск стоит на этом узле, его выходов в состоянии нет.
     assert state.current == ["upper"] and "upper" not in state.ports
+    assert state.write_order == ["start.event", "make.text"]
     assert state.ports["make"] == {"text": {"text": "привет"}}
     assert asyncio.run(store.load("run-1")) == state
     assert store.journal[-1][:2] == ("upper", "node_failed")
@@ -390,6 +407,29 @@ def test_block_events_the_store_rejects_do_not_break_the_run(strict_store, block
     assert strict_store.journal[lost][2] == {"count": 1, "reason": "RuntimeError"}
     assert kinds[lost + 1] == (node, "node_done")
     assert kinds[-1] == ("keep", "run_done")
+
+
+def test_cancelled_step_returns_the_previous_output_of_the_node(strict_store, blocks, pipeline):
+    """У узла уже был выход (так будет в цикле): отмена шага возвращает его на прежнее место."""
+    interrupted = RunState(
+        **RUN,
+        params={"phrase": "привет"},
+        current=["upper"],
+        ports={"upper": {"text": {"text": "СТАРОЕ"}}, "make": {"text": {"text": "привет"}}},
+        write_order=["upper.text", "make.text"],
+    )
+    asyncio.run(strict_store.save(interrupted))
+
+    async def with_zero(inputs, config, context):
+        return Done(outputs={"text": {"text": "при\x00вет"}})
+
+    blocks = with_run(blocks, "transform.fake_upper", with_zero)
+    state = asyncio.run(Engine(strict_store, blocks).resume(pipeline, "run-1"))
+
+    assert state.status is RunStatus.ERROR and state.current == ["upper"]
+    assert state.ports["upper"] == {"text": {"text": "СТАРОЕ"}}
+    assert state.write_order == ["upper.text", "make.text"]
+    assert asyncio.run(strict_store.load("run-1")) == state
 
 
 def test_finished_run_is_not_executed_again(store, blocks, pipeline, calls):

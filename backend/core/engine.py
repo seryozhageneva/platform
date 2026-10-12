@@ -92,9 +92,9 @@ class Engine:
             student_id=student_id,
             teacher_id=teacher_id,
             current=[first] if first else [],
-            # Событие — выход триггера: блоки читают его по ссылке «узел_триггера.event».
-            ports={trigger.id: {"event": event.model_dump(mode="json")}},
         )
+        # Событие — выход триггера: блоки читают его по ссылке «узел_триггера.event».
+        state.write(trigger.id, {"event": event.model_dump(mode="json")})
         await self._store.save(state)
         events = [BlockEvent(type="run_started", data={"trigger": event.trigger.value})]
         if not first:
@@ -126,8 +126,8 @@ class Engine:
                 outputs, outcome, block_events = await self._step(nodes.get(node_id), state)
             except NodeFailed as failure:
                 return await self._fail(state, node_id, str(failure))
-            before = state.ports.get(node_id)
-            state.ports[node_id] = {**(before or {}), **outputs}
+            before, order_before = state.ports.get(node_id), list(state.write_order)
+            state.write(node_id, outputs)
             target = _next(pipeline.transitions, node_id, outcome)
             state.current = [target] if target else []
             own_events = [BlockEvent(type="node_done", data={"outcome": outcome})]
@@ -148,6 +148,7 @@ class Engine:
                     del state.ports[node_id]
                 else:
                     state.ports[node_id] = before
+                state.write_order = order_before
                 reason = f"не удалось сохранить состояние после узла ({type(error).__name__})"
                 return await self._fail(state, node_id, reason)
             await self._journal(state.run_id, node_id, block_events, own_events)
