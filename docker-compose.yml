@@ -1,0 +1,40 @@
+# Сервисы, которые нужны платформе рядом с кодом: база данных и очередь.
+# Запуск:    docker compose up -d --wait
+# Остановка: docker compose down
+# Оба сервиса слушают только этот компьютер (127.0.0.1) и из сети не видны.
+
+name: platform
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_DB: platform
+      # Пароль берётся из файла .env и в репозиторий не попадает.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Добавь POSTGRES_PASSWORD в файл .env, см. .env.example}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Адрес указан явно: при первом запуске база ненадолго поднимается «для себя»,
+      # и без адреса проверка сочла бы её готовой раньше времени.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U platform -d platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  # Том с данными базы: переживает остановку и пересоздание контейнера.
+  pgdata:

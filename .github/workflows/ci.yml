@@ -1,0 +1,43 @@
+# CI: автоматические проверки на каждый pull request и на каждое изменение main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Код: оформление, линтер, правила импортов, тесты.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Установить библиотеки
+        run: uv sync --locked
+      - name: Оформление кода
+        run: uv run ruff format --check .
+      - name: Линтер
+        run: uv run ruff check .
+      - name: Правила импортов
+        run: uv run lint-imports
+      - name: Тесты
+        run: uv run pytest
+
+  # Сервисы: база и очередь поднимаются командой docker compose up.
+  services:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Случайный пароль базы на один прогон
+        run: echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > .env
+      - name: Поднять сервисы и дождаться готовности
+        run: docker compose up -d --wait
+      - name: Показать состояние
+        run: docker compose ps
+      - name: Остановить
+        if: always()
+        run: docker compose down -v

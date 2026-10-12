@@ -1,0 +1,33 @@
+# Паспорт Python-части проекта: версия Python, библиотеки и настройки инструментов.
+# Один файл на весь репозиторий: бэкенд, блоки и адаптеры живут в одном окружении (ADR 0003).
+
+[project]
+name = "edu-pipelines-platform"
+version = "0.1.0"
+description = "Платформа для построения персонализированных учебных пайплайнов на основе ИИ-агентов"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[tool.uv]
+# Проект не собирается в устанавливаемый пакет: код запускается прямо из папки репозитория.
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E, F — ошибки и опечатки; I — порядок импортов; UP — устаревший синтаксис; B — частые ловушки.
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+# Тесты ядра лежат в tests/, а блок, адаптер или сервис может носить свои тесты с собой.
+testpaths = ["tests", "blocks", "mcp_servers", "services"]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.15",
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
+]
