@@ -52,6 +52,7 @@ def paused_state(pipeline, teacher, student) -> RunState:
             "take_task": {"task": {"id": "t1", "statement": "Вычислите $\\log_2 8$."}},
             "tutor": {"hint": {"task_id": "t1", "level": 1, "text": "Чему равно $2^3$?"}},
         },
+        write_order=["take_task.task", "tutor.hint"],
         counters={"tutor": 1},
         waiting=[
             WaitingFor(
@@ -75,6 +76,32 @@ def test_saved_state_is_loaded_back_unchanged(sessions, pipeline, teacher, stude
         await PgRunStore(sessions).save(state)
         # Новое хранилище — как после перезапуска сервера.
         assert await PgRunStore(sessions).load(state.run_id) == state
+
+    asyncio.run(scenario())
+
+
+def test_write_order_survives_the_database(sessions, pipeline):
+    """База хранит `ports` без порядка ключей; что записано последним, помнит `write_order`."""
+    state = RunState(
+        run_id=str(uuid.uuid4()),
+        pipeline_id=str(pipeline.id),
+        pipeline_version=1,
+        item_index={"each_work": 3},
+    )
+    state.write("show_answer_from_form", {"answer": "из формы"})
+    state.write("ocr", {"answer": "с фото"})
+    state.write("show_answer_from_form", {"answer": "снова из формы"})
+
+    async def scenario():
+        await PgRunStore(sessions).save(state)
+        loaded = await PgRunStore(sessions).load(state.run_id)
+
+        assert loaded == state
+        assert loaded.write_order == ["ocr.answer", "show_answer_from_form.answer"]
+        assert loaded.latest(["ocr.answer", "show_answer_from_form.answer"]) == (
+            "show_answer_from_form.answer"
+        )
+        assert loaded.item_index == {"each_work": 3}
 
     asyncio.run(scenario())
 
