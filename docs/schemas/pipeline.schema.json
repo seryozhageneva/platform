@@ -1,0 +1,564 @@
+{
+  "$defs": {
+    "BlockNode": {
+      "additionalProperties": false,
+      "description": "Блок со своими настройками и привязками входов: имя входа -> откуда взять данные.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Limit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "block",
+          "title": "Type",
+          "type": "string"
+        },
+        "block": {
+          "title": "Block",
+          "type": "string"
+        },
+        "config": {
+          "additionalProperties": true,
+          "default": {},
+          "title": "Config",
+          "type": "object"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?$",
+                "type": "string"
+              },
+              {
+                "items": {
+                  "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?$",
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              }
+            ]
+          },
+          "default": {},
+          "title": "Inputs",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "block"
+      ],
+      "title": "BlockNode",
+      "type": "object"
+    },
+    "Body": {
+      "additionalProperties": false,
+      "description": "Тело «для каждого»: маленький граф, который начинается с узла `start`.",
+      "properties": {
+        "start": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Start",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "block": "#/$defs/BlockNode",
+                "for_each": "#/$defs/ForEachNode",
+                "switch": "#/$defs/SwitchNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/BlockNode"
+              },
+              {
+                "$ref": "#/$defs/SwitchNode"
+              },
+              {
+                "$ref": "#/$defs/ForEachNode"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "transitions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Transition"
+          },
+          "title": "Transitions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "start",
+        "nodes"
+      ],
+      "title": "Body",
+      "type": "object"
+    },
+    "ForEachNode": {
+      "additionalProperties": false,
+      "description": "«Для каждого»: выполнить `body` отдельно для каждого элемента списка `over`.\n\nВнутри тела текущий элемент доступен как выход `item` этого узла. `collect` говорит,\nчто собрать в выход `results`: одно значение или запись из нескольких (тогда `as` —\nназвание записи, по которому её поля потом читаются как «узел.порт.поле»).",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Limit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "for_each",
+          "title": "Type",
+          "type": "string"
+        },
+        "over": {
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?$",
+          "title": "Over",
+          "type": "string"
+        },
+        "body": {
+          "$ref": "#/$defs/Body"
+        },
+        "collect": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?$",
+              "type": "string"
+            },
+            {
+              "patternProperties": {
+                "^[a-z][a-z0-9_]*$": {
+                  "anyOf": [
+                    {
+                      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?$",
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collect"
+        },
+        "as": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "over",
+        "body"
+      ],
+      "title": "ForEachNode",
+      "type": "object"
+    },
+    "Launch": {
+      "additionalProperties": false,
+      "description": "Один способ запуска пайплайна.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/TriggerType"
+        },
+        "cron": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cron"
+        },
+        "settings": {
+          "additionalProperties": true,
+          "default": {},
+          "title": "Settings",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Launch",
+      "type": "object"
+    },
+    "Limit": {
+      "additionalProperties": false,
+      "description": "Ограничитель: сколько раз узел можно пройти и куда идти, когда попытки кончились.",
+      "properties": {
+        "max": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "$ref": "#/$defs/ParamRef"
+            }
+          ],
+          "title": "Max"
+        },
+        "otherwise": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Otherwise"
+        },
+        "reset_on": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reset On"
+        }
+      },
+      "required": [
+        "max"
+      ],
+      "title": "Limit",
+      "type": "object"
+    },
+    "Param": {
+      "additionalProperties": false,
+      "description": "Значение, которое преподаватель заполняет при назначении, а не зашивает в схему.",
+      "properties": {
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/ParamType"
+        },
+        "default": {
+          "default": null,
+          "title": "Default"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "type"
+      ],
+      "title": "Param",
+      "type": "object"
+    },
+    "ParamRef": {
+      "additionalProperties": false,
+      "description": "Ссылка на параметр пайплайна: `{\"$param\": \"topic\"}`.",
+      "properties": {
+        "$param": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "$Param",
+          "type": "string"
+        }
+      },
+      "required": [
+        "$param"
+      ],
+      "title": "ParamRef",
+      "type": "object"
+    },
+    "ParamType": {
+      "enum": [
+        "string",
+        "integer",
+        "number",
+        "boolean"
+      ],
+      "title": "ParamType",
+      "type": "string"
+    },
+    "SwitchNode": {
+      "additionalProperties": false,
+      "description": "Развилка по значению: исход узла — значение поля `field` у данных `value`.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Limit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "switch",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?$",
+          "title": "Value",
+          "type": "string"
+        },
+        "field": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Field",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "value",
+        "field"
+      ],
+      "title": "SwitchNode",
+      "type": "object"
+    },
+    "Transition": {
+      "additionalProperties": false,
+      "description": "Переход «после узла `from` при исходе `when` выполнить узел `to`».\n\nПереход без `when` срабатывает при любом исходе, для которого нет своего перехода.",
+      "properties": {
+        "from": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "From",
+          "type": "string"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "When"
+        },
+        "to": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "Transition",
+      "type": "object"
+    },
+    "TriggerNode": {
+      "additionalProperties": false,
+      "description": "Стартовый узел. У него один выход — `event` типа Event.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "trigger",
+          "title": "Type",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "launches": {
+          "items": {
+            "$ref": "#/$defs/Launch"
+          },
+          "minItems": 1,
+          "title": "Launches",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "launches"
+      ],
+      "title": "TriggerNode",
+      "type": "object"
+    },
+    "TriggerType": {
+      "description": "Способы запуска пайплайна.",
+      "enum": [
+        "manual",
+        "student",
+        "schedule",
+        "moodle_event"
+      ],
+      "title": "TriggerType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": 1,
+      "default": 1,
+      "title": "Format",
+      "type": "integer"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "params": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Param"
+      },
+      "title": "Params",
+      "type": "array"
+    },
+    "nodes": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "block": "#/$defs/BlockNode",
+            "for_each": "#/$defs/ForEachNode",
+            "switch": "#/$defs/SwitchNode",
+            "trigger": "#/$defs/TriggerNode"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/TriggerNode"
+          },
+          {
+            "$ref": "#/$defs/BlockNode"
+          },
+          {
+            "$ref": "#/$defs/SwitchNode"
+          },
+          {
+            "$ref": "#/$defs/ForEachNode"
+          }
+        ]
+      },
+      "minItems": 1,
+      "title": "Nodes",
+      "type": "array"
+    },
+    "transitions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Transition"
+      },
+      "title": "Transitions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "nodes"
+  ],
+  "title": "Pipeline",
+  "type": "object"
+}

@@ -1,0 +1,13 @@
+# Черновик: описание блока без кода.
+id: transform.document_to_text
+version: 0.1.0
+name: "Преобразование: документ → текст"
+description: Извлекает текст из файла PDF или DOCX.
+author: platform
+category: transform
+inputs:
+  - {name: file, title: Документ, type: File}
+outputs:
+  - {name: text, title: Текст документа, type: Text}
+outcomes: [ok, unreadable]
+runtime: {type: python, entrypoint: "blocks.transform.document_to_text:run"}

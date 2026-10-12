@@ -1,0 +1,13 @@
+# Черновик: описание блока без кода.
+id: sink.moodle_grades
+version: 0.1.0
+name: "Получатель: оценки в Moodle"
+description: Выставляет оценку и комментарий за работу в Moodle.
+author: platform
+category: sink
+inputs:
+  - {name: work, title: За какую работу, type: File}
+  - {name: verdict, title: Оценка, type: Verdict}
+  - {name: comment, title: Комментарий, type: Data, required: false}
+runtime: {type: mcp, server: moodle, tool: save_grade}
+side_effects: true

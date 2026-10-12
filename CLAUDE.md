@@ -8,7 +8,8 @@
 - `docs/roadmap.md` — 34 задачи с критериями «готово, когда».
 - `docs/glossary.md` — словарь терминов.
 - `docs/open-questions.md` — нерешённые вопросы; загляни сюда перед планом задачи.
-- `docs/adr/` — архитектурные решения. `docs/contract.md` появится в задаче 02.
+- `docs/contract.md` — контракт блока и формат пайплайна; примеры — в `docs/examples/`, схемы — в `docs/schemas/`.
+- `docs/adr/` — архитектурные решения.
 
 ## Стек
 
@@ -19,7 +20,7 @@
 
 ## Структура
 
-Папки созданы в задаче 01 и пока пустые; наполняются по задачам карты.
+Папки созданы в задаче 01; наполняются по задачам карты.
 
 ```
 backend/core/            движок, реестр, валидатор
@@ -45,7 +46,8 @@ docker compose down              остановить сервисы (данны
 uv run pytest                    тесты
 uv run ruff format --check .     проверка оформления кода
 uv run ruff check .              линтер
-uv run lint-imports              правила импортов из .importlinter (ADR 0003)
+uv run lint-imports              правила импортов из .importlinter (ADR 0003, 0006)
+uv run python -m backend.core.contracts.schema_export    обновить docs/schemas/ после правки контракта
 ```
 
 CI (`.github/workflows/ci.yml`) запускает то же самое на каждый pull request. Тесты и линтер фронтенда появятся в задаче 13.

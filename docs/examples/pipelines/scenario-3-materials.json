@@ -1,0 +1,138 @@
+{
+  "format": 1,
+  "id": "scenario_3_materials",
+  "name": "Подготовка материалов",
+  "description": "Из текста лекции получаются конспект и задачи с эталонными решениями; задачи проверяются и после подтверждения попадают в банк и в файл.",
+  "params": [
+    {"name": "lecture_file", "title": "Файл лекции", "type": "string"}
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "title": "Преподаватель нажал «Запустить»",
+      "launches": [{"type": "manual"}]
+    },
+    {
+      "id": "get_file",
+      "type": "block",
+      "block": "source.file",
+      "title": "Взять файл лекции",
+      "config": {"file_id": {"$param": "lecture_file"}}
+    },
+    {
+      "id": "extract",
+      "type": "block",
+      "block": "transform.document_to_text",
+      "title": "Извлечь текст",
+      "inputs": {"file": "get_file.file"}
+    },
+    {
+      "id": "summarize",
+      "type": "block",
+      "block": "ai_process.generate",
+      "title": "Сделать конспект",
+      "config": {
+        "prompt": "Составь конспект лекции и список ключевых понятий.",
+        "result": {"type": "Data", "of": "summary"}
+      },
+      "inputs": {"data": "extract.text"}
+    },
+    {
+      "id": "save_summary",
+      "type": "block",
+      "block": "sink.cabinet",
+      "title": "Конспект в кабинет",
+      "config": {"to": "teacher", "title": "Конспект лекции"},
+      "inputs": {"content": "summarize.result"}
+    },
+    {
+      "id": "make_tasks",
+      "type": "block",
+      "block": "ai_process.generate",
+      "title": "Сгенерировать задачи",
+      "config": {
+        "prompt": "Составь задачи по лекции с эталонными ответами и решениями.",
+        "result": {"type": "Task", "list": true}
+      },
+      "inputs": {"data": "extract.text", "context": "summarize.result"}
+    },
+    {
+      "id": "each_task",
+      "type": "for_each",
+      "title": "Для каждой задачи",
+      "over": "make_tasks.result",
+      "body": {
+        "start": "solve",
+        "nodes": [
+          {
+            "id": "solve",
+            "type": "block",
+            "block": "ai_process.generate",
+            "title": "Решить независимо",
+            "config": {
+              "prompt": "Реши задачу, не глядя на эталон. Верни только ответ.",
+              "result": {"type": "Answer"}
+            },
+            "inputs": {"data": "each_task.item"}
+          },
+          {
+            "id": "verify",
+            "type": "block",
+            "block": "check.exact",
+            "title": "Сверить с эталоном",
+            "inputs": {"task": "each_task.item", "answer": "solve.result"}
+          }
+        ],
+        "transitions": [{"from": "solve", "to": "verify"}]
+      },
+      "collect": {"task": "each_task.item", "verdict": "verify.verdict"},
+      "as": "checked_task"
+    },
+    {
+      "id": "review",
+      "type": "block",
+      "block": "approval.review_table",
+      "title": "Преподаватель подтверждает задачи",
+      "inputs": {"items": "each_task.results"}
+    },
+    {
+      "id": "each_approved",
+      "type": "for_each",
+      "title": "Для каждой подтверждённой задачи",
+      "over": "review.approved",
+      "body": {
+        "start": "to_bank",
+        "nodes": [
+          {
+            "id": "to_bank",
+            "type": "block",
+            "block": "sink.task_bank",
+            "title": "Сохранить в банк задач",
+            "inputs": {"task": "each_approved.item.task"}
+          }
+        ]
+      },
+      "collect": "each_approved.item.task"
+    },
+    {
+      "id": "export",
+      "type": "block",
+      "block": "sink.file",
+      "title": "Выгрузить файл для Moodle",
+      "config": {"format": "moodle_xml"},
+      "inputs": {"content": "each_approved.results"}
+    }
+  ],
+  "transitions": [
+    {"from": "start", "to": "get_file"},
+    {"from": "get_file", "to": "extract"},
+    {"from": "extract", "when": "ok", "to": "summarize"},
+    {"from": "summarize", "to": "save_summary"},
+    {"from": "save_summary", "to": "make_tasks"},
+    {"from": "make_tasks", "to": "each_task"},
+    {"from": "each_task", "when": "ok", "to": "review"},
+    {"from": "review", "when": "approved", "to": "each_approved"},
+    {"from": "each_approved", "when": "ok", "to": "export"}
+  ]
+}

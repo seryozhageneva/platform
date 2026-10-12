@@ -19,6 +19,8 @@ forbidden_modules =
     services
 # Единственное исключение из запрета — сами контракты.
 ignore_imports =
+    blocks -> backend.core.contracts
+    blocks -> backend.core.contracts.**
     blocks.** -> backend.core.contracts
     blocks.** -> backend.core.contracts.**
 unmatched_ignore_imports_alerting = none
@@ -61,8 +63,56 @@ forbidden_modules =
     mcp_servers
     services
 ignore_imports =
+    mcp_servers -> backend.core.contracts
+    mcp_servers -> backend.core.contracts.**
     mcp_servers.** -> backend.core.contracts
     mcp_servers.** -> backend.core.contracts.**
+    services -> backend.core.contracts
+    services -> backend.core.contracts.**
     services.** -> backend.core.contracts
     services.** -> backend.core.contracts.**
 unmatched_ignore_imports_alerting = none
+
+[importlinter:contract:backend-services-see-only-contracts]
+name = 5. Слой ИИ-моделей, MCP-клиент и модели базы видят только контракты
+type = forbidden
+source_modules =
+    backend.llm
+    backend.mcp_client
+    backend.models
+# Друг друга они тоже не подключают: каждый реализует свой интерфейс из контрактов (ADR 0006).
+forbidden_modules =
+    backend.core
+    backend.api
+    backend.triggers
+    backend.llm
+    backend.mcp_client
+    backend.models
+ignore_imports =
+    backend.llm -> backend.core.contracts
+    backend.llm -> backend.core.contracts.**
+    backend.llm.** -> backend.core.contracts
+    backend.llm.** -> backend.core.contracts.**
+    backend.mcp_client -> backend.core.contracts
+    backend.mcp_client -> backend.core.contracts.**
+    backend.mcp_client.** -> backend.core.contracts
+    backend.mcp_client.** -> backend.core.contracts.**
+    backend.models -> backend.core.contracts
+    backend.models -> backend.core.contracts.**
+    backend.models.** -> backend.core.contracts
+    backend.models.** -> backend.core.contracts.**
+unmatched_ignore_imports_alerting = none
+
+[importlinter:contract:core-knows-no-services]
+name = 6. Ядро не подключает слой ИИ-моделей, MCP-клиент, модели базы, API и триггеры
+type = forbidden
+source_modules =
+    backend.core
+# Модель, инструменты и хранилище ядро получает готовыми от слоя сборки — API и триггеров.
+# Им самим разрешено подключать весь бэкенд: на них правил нет.
+forbidden_modules =
+    backend.llm
+    backend.mcp_client
+    backend.models
+    backend.api
+    backend.triggers

@@ -1,0 +1,23 @@
+# Черновик: описание блока без кода.
+id: student.tutor
+version: 0.1.0
+name: ИИ-тьютор
+description: >-
+  Выдаёт одну подсказку уровня 1–3; контролёр проверяет, что ответ не раскрыт. Сам ученика
+  не ждёт: подсказку показывает блок «Показать задачу и принять ответ».
+author: platform
+category: student
+inputs:
+  - {name: task, title: Задача с эталонным решением, type: Task}
+  - {name: answer, title: Последний ответ ученика, type: Answer, required: false}
+  - {name: verdict, title: Вердикт по ответу, type: Verdict, required: false}
+  # Следующий уровень — на один выше прошлой подсказки по той же задаче.
+  - {name: previous_hint, title: Прошлая подсказка, type: Hint, required: false}
+outputs:
+  - {name: hint, title: Подсказка, type: Hint}
+config:
+  type: object
+  properties:
+    model: {title: Модель, type: string}
+outcomes: [hint, give_up]
+runtime: {type: python, entrypoint: "blocks.student.tutor:run"}

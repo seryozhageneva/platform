@@ -1,0 +1,47 @@
+# Полный пример 3 из 3: отдельный сервис (runtime http) — песочница для кода учеников.
+id: check.code_tests
+version: 0.1.0
+name: "Проверка: тесты кода в песочнице"
+description: >-
+  Запускает код ученика в изолированном контейнере на тестах, записанных в задаче,
+  и выносит вердикт.
+author: platform
+category: check
+kind: auto
+
+inputs:
+  - name: task
+    title: Задача с тестами
+    type: Task
+  - name: answer
+    title: Код ученика
+    type: Answer
+
+outputs:
+  - name: verdict
+    title: Вердикт
+    type: Verdict
+
+config:
+  type: object
+  properties:
+    time_limit_seconds:
+      title: Лимит времени на один тест, секунд
+      type: integer
+      minimum: 1
+      default: 5
+    memory_limit_mb:
+      title: Лимит памяти, мегабайт
+      type: integer
+      minimum: 16
+      default: 128
+
+outcomes: [correct, wrong]
+
+# Сервис отвечает на GET /manifest (этим же манифестом) и POST /run.
+# Здесь имя сервиса из docker-compose, а не адрес в интернете.
+runtime:
+  type: http
+  url: http://sandbox:8000
+
+side_effects: false

@@ -1,0 +1,13 @@
+# Черновик: описание блока без кода.
+id: transform.extract_code
+version: 0.1.0
+name: "Преобразование: извлечение кода"
+description: Достаёт из сданного файла код программы и оформляет его как ответ на задачу.
+author: platform
+category: transform
+inputs:
+  - {name: file, title: Файл с кодом, type: File}
+outputs:
+  - {name: answer, title: Код как ответ, type: Answer}
+outcomes: [ok, unreadable]
+runtime: {type: python, entrypoint: "blocks.transform.extract_code:run"}

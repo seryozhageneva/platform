@@ -19,6 +19,14 @@ PROBE = {
     "backend/core/contracts/__init__.py": "",
     "backend/core/contracts/ports.py": "",
     "backend/core/engine.py": "",
+    "backend/llm/__init__.py": "",
+    "backend/llm/client.py": "",
+    "backend/mcp_client/__init__.py": "",
+    "backend/models/__init__.py": "",
+    "backend/models/runs.py": "",
+    "backend/api/__init__.py": "",
+    "backend/api/app.py": "",
+    "backend/triggers/__init__.py": "",
     "blocks/__init__.py": "",
     "blocks/check/__init__.py": "",
     "blocks/check/demo.py": "",
@@ -80,6 +88,40 @@ def test_adapter_cannot_import_service(tmp_path):
     assert "4. Адаптеры и сервисы видят только контракты BROKEN" in result.stdout
 
 
+SERVICES_RULE = "5. Слой ИИ-моделей, MCP-клиент и модели базы видят только контракты BROKEN"
+CORE_RULE = "6. Ядро не подключает слой ИИ-моделей, MCP-клиент, модели базы, API и триггеры BROKEN"
+
+
+def test_llm_layer_cannot_import_engine(tmp_path):
+    result = lint(tmp_path, {"backend/llm/client.py": "import backend.core.engine\n"})
+    assert result.returncode != 0, result.stdout
+    assert SERVICES_RULE in result.stdout
+
+
+def test_llm_layer_cannot_import_database_models(tmp_path):
+    result = lint(tmp_path, {"backend/llm/client.py": "import backend.models.runs\n"})
+    assert result.returncode != 0, result.stdout
+    assert SERVICES_RULE in result.stdout
+
+
+def test_database_models_cannot_import_api(tmp_path):
+    result = lint(tmp_path, {"backend/models/runs.py": "import backend.api.app\n"})
+    assert result.returncode != 0, result.stdout
+    assert SERVICES_RULE in result.stdout
+
+
+def test_engine_cannot_import_llm_layer(tmp_path):
+    result = lint(tmp_path, {"backend/core/engine.py": "import backend.llm.client\n"})
+    assert result.returncode != 0, result.stdout
+    assert CORE_RULE in result.stdout
+
+
+def test_engine_cannot_import_database_models(tmp_path):
+    result = lint(tmp_path, {"backend/core/engine.py": "import backend.models.runs\n"})
+    assert result.returncode != 0, result.stdout
+    assert CORE_RULE in result.stdout
+
+
 def test_contracts_are_allowed_everywhere(tmp_path):
     result = lint(
         tmp_path,
@@ -87,7 +129,41 @@ def test_contracts_are_allowed_everywhere(tmp_path):
             "blocks/check/demo.py": "from backend.core.contracts import ports\n",
             "mcp_servers/moodle/server.py": "import backend.core.contracts.ports\n",
             "backend/core/engine.py": "from backend.core.contracts import ports\n",
+            "backend/llm/client.py": "from backend.core.contracts import ports\n",
+            "backend/models/runs.py": "import backend.core.contracts.ports\n",
         },
     )
     assert result.returncode == 0, result.stdout
-    assert "4 kept, 0 broken" in result.stdout
+    assert "6 kept, 0 broken" in result.stdout
+
+
+def test_package_init_files_may_import_contracts_too(tmp_path):
+    """Файл __init__.py — это сам пакет: разрешение на контракты действует и для него."""
+    result = lint(
+        tmp_path,
+        {
+            "blocks/__init__.py": "from backend.core.contracts import ports\n",
+            "mcp_servers/__init__.py": "from backend.core.contracts import ports\n",
+            "services/__init__.py": "import backend.core.contracts.ports\n",
+            "backend/llm/__init__.py": "from backend.core.contracts import ports\n",
+            "backend/models/__init__.py": "import backend.core.contracts.ports\n",
+        },
+    )
+    assert result.returncode == 0, result.stdout
+    assert "6 kept, 0 broken" in result.stdout
+
+
+def test_assembly_layer_can_import_the_whole_backend(tmp_path):
+    """API и триггеры — слой сборки: они соединяют ядро с настоящими реализациями."""
+    result = lint(
+        tmp_path,
+        {
+            "backend/api/app.py": (
+                "import backend.core.engine\n"
+                "import backend.llm.client\n"
+                "import backend.models.runs\n"
+            ),
+        },
+    )
+    assert result.returncode == 0, result.stdout
+    assert "6 kept, 0 broken" in result.stdout

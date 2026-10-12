@@ -1,0 +1,17 @@
+# Черновик: описание блока без кода.
+id: sink.cabinet
+version: 0.1.0
+name: "Получатель: кабинет"
+description: Показывает результат в кабинете преподавателя или ученика.
+author: platform
+category: sink
+inputs:
+  - {name: content, title: Что показать, type: Data}
+  # Значение, в котором записан ученик (student_id): работа или результат.
+  - {name: recipient, title: Кому адресовано, type: Data, required: false}
+config:
+  type: object
+  properties:
+    to: {title: Чей кабинет, enum: [teacher, student, recipient], default: teacher}
+    title: {title: Заголовок, type: string}
+runtime: {type: python, entrypoint: "blocks.sink.cabinet:run"}

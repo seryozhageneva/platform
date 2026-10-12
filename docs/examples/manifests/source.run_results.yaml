@@ -1,0 +1,21 @@
+# Черновик: описание блока без кода.
+id: source.run_results
+version: 0.1.0
+name: "Источник: итог этого запуска"
+description: Собирает из журнала событий итог урока — сколько задач решено и сколько подсказок взято.
+author: platform
+category: source
+outputs:
+  - name: result
+    title: Итог урока
+    type: Data
+    of: lesson_result
+    schema:
+      type: object
+      required: [student_id, tasks_total, tasks_solved, hints_used]
+      properties:
+        student_id: {type: string}
+        tasks_total: {type: integer}
+        tasks_solved: {type: integer}
+        hints_used: {type: integer}
+runtime: {type: python, entrypoint: "blocks.source.run_results:run"}

@@ -1,0 +1,146 @@
+{
+  "format": 1,
+  "id": "scenario_1_training",
+  "name": "Тренировка с ИИ-тьютором",
+  "description": "Ученик решает N задач по теме. После неверного ответа тьютор даёт подсказку, сложность подстраивается.",
+  "params": [
+    {"name": "topic", "title": "Тема", "type": "string"},
+    {"name": "difficulty", "title": "Стартовая сложность", "type": "integer", "default": 1},
+    {"name": "n_tasks", "title": "Число задач в уроке", "type": "integer", "default": 5},
+    {"name": "max_hints", "title": "Подсказок на одну задачу", "type": "integer", "default": 3}
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "title": "Ученик открыл урок",
+      "launches": [{"type": "student"}]
+    },
+    {
+      "id": "take_task",
+      "type": "block",
+      "block": "source.task_bank",
+      "title": "Взять задачу",
+      "config": {
+        "topic": {"$param": "topic"},
+        "difficulty": {"$param": "difficulty"},
+        "adapt": true
+      },
+      "inputs": {
+        "previous": "take_task.task",
+        "verdict": ["check_exact.verdict", "check_code.verdict", "check_rubric.verdict"]
+      },
+      "limit": {"max": {"$param": "n_tasks"}, "otherwise": "collect_results"}
+    },
+    {
+      "id": "show",
+      "type": "block",
+      "block": "student.show_task",
+      "title": "Показать задачу и принять ответ",
+      "config": {"forms": ["text", "formula", "code", "photo"], "allow_hints": true},
+      "inputs": {"task": "take_task.task", "hint": "tutor.hint"}
+    },
+    {
+      "id": "recognize",
+      "type": "block",
+      "block": "transform.photo_to_latex",
+      "title": "Распознать фото",
+      "inputs": {"answer": "show.answer"},
+      "limit": {"max": 3, "otherwise": "take_task", "reset_on": "take_task"}
+    },
+    {
+      "id": "by_method",
+      "type": "switch",
+      "title": "Как проверять эту задачу",
+      "value": "take_task.task",
+      "field": "check_method"
+    },
+    {
+      "id": "check_exact",
+      "type": "block",
+      "block": "check.exact",
+      "title": "Проверить по эталону",
+      "inputs": {"task": "take_task.task", "answer": ["show.answer", "recognize.answer"]}
+    },
+    {
+      "id": "check_code",
+      "type": "block",
+      "block": "check.code_tests",
+      "title": "Проверить код тестами",
+      "inputs": {"task": "take_task.task", "answer": "show.answer"}
+    },
+    {
+      "id": "check_rubric",
+      "type": "block",
+      "block": "check.rubric",
+      "title": "Проверить по рубрике",
+      "inputs": {"task": "take_task.task", "work": ["show.answer", "recognize.answer"]}
+    },
+    {
+      "id": "tutor",
+      "type": "block",
+      "block": "student.tutor",
+      "title": "Дать подсказку",
+      "inputs": {
+        "task": "take_task.task",
+        "answer": ["show.answer", "recognize.answer"],
+        "verdict": ["check_exact.verdict", "check_code.verdict", "check_rubric.verdict"],
+        "previous_hint": "tutor.hint"
+      },
+      "limit": {"max": {"$param": "max_hints"}, "otherwise": "take_task", "reset_on": "take_task"}
+    },
+    {
+      "id": "collect_results",
+      "type": "block",
+      "block": "source.run_results",
+      "title": "Собрать итог урока"
+    },
+    {
+      "id": "to_teacher",
+      "type": "block",
+      "block": "sink.cabinet",
+      "title": "Отчёт преподавателю",
+      "config": {"to": "teacher", "title": "Отчёт об уроке"},
+      "inputs": {"content": "collect_results.result"}
+    },
+    {
+      "id": "to_student",
+      "type": "block",
+      "block": "sink.cabinet",
+      "title": "Итог ученику",
+      "config": {"to": "student", "title": "Итог урока"},
+      "inputs": {"content": "collect_results.result"}
+    },
+    {
+      "id": "to_telegram",
+      "type": "block",
+      "block": "sink.telegram",
+      "title": "Итог в Telegram",
+      "inputs": {"content": "collect_results.result"}
+    }
+  ],
+  "transitions": [
+    {"from": "start", "to": "take_task"},
+    {"from": "take_task", "when": "ok", "to": "show"},
+    {"from": "take_task", "when": "empty", "to": "collect_results"},
+    {"from": "show", "when": "answer", "to": "by_method"},
+    {"from": "show", "when": "photo", "to": "recognize"},
+    {"from": "show", "when": "hint_requested", "to": "tutor"},
+    {"from": "recognize", "when": "ok", "to": "by_method"},
+    {"from": "recognize", "when": "unreadable", "to": "show"},
+    {"from": "by_method", "when": "short_answer", "to": "check_exact"},
+    {"from": "by_method", "when": "code", "to": "check_code"},
+    {"from": "by_method", "when": "long_answer", "to": "check_rubric"},
+    {"from": "check_exact", "when": "correct", "to": "take_task"},
+    {"from": "check_exact", "when": "wrong", "to": "tutor"},
+    {"from": "check_code", "when": "correct", "to": "take_task"},
+    {"from": "check_code", "when": "wrong", "to": "tutor"},
+    {"from": "check_rubric", "when": "correct", "to": "take_task"},
+    {"from": "check_rubric", "when": "wrong", "to": "tutor"},
+    {"from": "tutor", "when": "hint", "to": "show"},
+    {"from": "tutor", "when": "give_up", "to": "take_task"},
+    {"from": "collect_results", "to": "to_teacher"},
+    {"from": "to_teacher", "to": "to_student"},
+    {"from": "to_student", "to": "to_telegram"}
+  ]
+}

@@ -1,0 +1,14 @@
+# Черновик: описание блока без кода.
+id: check.exact
+version: 0.1.0
+name: "Проверка: по эталону"
+description: Сравнивает ответ с эталоном как математические выражения (SymPy), а не как текст.
+author: platform
+category: check
+inputs:
+  - {name: task, title: Задача с эталонным ответом, type: Task}
+  - {name: answer, title: Ответ, type: Answer}
+outputs:
+  - {name: verdict, title: Вердикт, type: Verdict}
+outcomes: [correct, wrong]
+runtime: {type: python, entrypoint: "blocks.check.exact:run"}
