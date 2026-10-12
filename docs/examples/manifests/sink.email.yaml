@@ -1,0 +1,18 @@
+# Черновик: описание блока без кода.
+id: sink.email
+version: 0.1.0
+name: "Получатель: email"
+description: Отправляет письмо ученику, если он указал почту для уведомлений.
+author: platform
+category: sink
+inputs:
+  - {name: content, title: Текст письма, type: Data}
+  - {name: recipient, title: Кому адресовано, type: Data}
+config:
+  type: object
+  properties:
+    subject: {title: Тема письма, type: string}
+outcomes: [sent, skipped]
+runtime: {type: mcp, server: email, tool: send_email}
+# Отправка письма — действие с последствиями: перед блоком нужно Подтверждение.
+side_effects: true

@@ -1,0 +1,15 @@
+# Черновик: описание блока без кода.
+id: transform.photo_to_latex
+version: 0.1.0
+name: "Преобразование: фото → LaTeX"
+description: Распознаёт фото рукописного решения и просит ученика подтвердить распознанное.
+author: platform
+category: transform
+kind: interactive
+screen: confirm_recognized
+inputs:
+  - {name: answer, title: Ответ-фото, type: Answer}
+outputs:
+  - {name: answer, title: Распознанный ответ, type: Answer}
+outcomes: [ok, unreadable]
+runtime: {type: python, entrypoint: "blocks.transform.photo_to_latex:run"}

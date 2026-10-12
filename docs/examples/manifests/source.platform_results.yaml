@@ -1,0 +1,29 @@
+# Черновик: описание блока без кода.
+id: source.platform_results
+version: 0.1.0
+name: "Источник: результаты группы"
+description: Достаёт из хранилища платформы результаты учеников группы за период.
+author: platform
+category: source
+outputs:
+  - name: results
+    title: Результаты учеников
+    type: Data
+    of: student_result
+    list: true
+    schema:
+      type: object
+      required: [student_id]
+      properties:
+        student_id: {type: string}
+        tasks_solved: {type: integer}
+        hints_used: {type: integer}
+        weak_topics: {type: array, items: {type: string}}
+config:
+  type: object
+  required: [group_id]
+  properties:
+    group_id: {title: Группа, type: string}
+    period_days: {title: За сколько дней, type: integer, minimum: 1, default: 7}
+outcomes: [ok, empty]
+runtime: {type: python, entrypoint: "blocks.source.platform_results:run"}

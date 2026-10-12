@@ -1,0 +1,15 @@
+# Черновик: описание блока без кода.
+id: source.file
+version: 0.1.0
+name: "Источник: файл"
+description: Отдаёт файл, который преподаватель загрузил на платформу.
+author: platform
+category: source
+outputs:
+  - {name: file, title: Файл, type: File}
+config:
+  type: object
+  required: [file_id]
+  properties:
+    file_id: {title: Файл, type: string}
+runtime: {type: python, entrypoint: "blocks.source.file:run"}

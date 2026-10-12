@@ -1,0 +1,15 @@
+# Черновик: описание блока без кода.
+id: sink.telegram
+version: 0.1.0
+name: "Получатель: Telegram"
+description: >-
+  Отправляет сообщение ученику в Telegram, если он подключил уведомления. Без входа
+  «кому» пишет ученику этого запуска.
+author: platform
+category: sink
+inputs:
+  - {name: content, title: Текст сообщения, type: Data}
+  - {name: recipient, title: Кому адресовано, type: Data, required: false}
+outcomes: [sent, skipped]
+runtime: {type: mcp, server: telegram, tool: send_message}
+side_effects: true

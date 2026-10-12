@@ -1,0 +1,34 @@
+# Черновик: описание блока без кода.
+id: ai_process.generate
+version: 0.1.0
+name: ИИ-обработка
+description: >-
+  Готовит результат по шаблону промпта и схеме: комментарий, конспект, задания, сводку,
+  письмо. Что именно получится, записано в настройке «Тип результата».
+author: platform
+category: ai_process
+inputs:
+  - {name: data, title: Исходные данные, type: Data}
+  - {name: context, title: Дополнительные данные, type: Data, required: false}
+outputs:
+  # Тип выхода у каждого узла свой — берётся из настройки result.
+  - {name: result, title: Результат, type: Data, from_config: result}
+config:
+  type: object
+  required: [prompt, result]
+  properties:
+    prompt: {title: Шаблон промпта, type: string}
+    result:
+      title: Тип результата
+      type: object
+      required: [type]
+      properties:
+        type: {enum: [Data, Text, Task, Answer]}
+        of: {title: Уточнение для Data, type: string}
+        list: {title: Список, type: boolean, default: false}
+    result_schema: {title: Схема результата (JSON Schema), type: object}
+    model: {title: Модель, type: string}
+runtime: {type: python, entrypoint: "blocks.ai_process.generate:run"}
+# Агенту внутри блока разрешён только этот инструмент чтения.
+tools:
+  - {server: moodle, tool: get_grades}

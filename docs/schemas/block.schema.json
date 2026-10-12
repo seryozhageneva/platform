@@ -1,0 +1,411 @@
+{
+  "$defs": {
+    "Category": {
+      "description": "Семь категорий блоков. Триггер — узел ядра, манифеста у него нет.",
+      "enum": [
+        "source",
+        "transform",
+        "student",
+        "check",
+        "ai_process",
+        "approval",
+        "sink"
+      ],
+      "title": "Category",
+      "type": "string"
+    },
+    "HttpRuntime": {
+      "additionalProperties": false,
+      "description": "Отдельный сервис: `GET {url}/manifest`, `POST {url}/run`.",
+      "properties": {
+        "type": {
+          "const": "http",
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "pattern": "^https?://",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "url"
+      ],
+      "title": "HttpRuntime",
+      "type": "object"
+    },
+    "InputPort": {
+      "additionalProperties": false,
+      "description": "Вход блока. Необязательный вход может остаться без данных.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/PortType"
+        },
+        "of": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Of"
+        },
+        "list": {
+          "default": false,
+          "title": "List",
+          "type": "boolean"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "title"
+      ],
+      "title": "InputPort",
+      "type": "object"
+    },
+    "Kind": {
+      "enum": [
+        "auto",
+        "interactive",
+        "approval"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "McpRuntime": {
+      "additionalProperties": false,
+      "description": "Блок-обёртка над одним инструментом MCP-сервера.",
+      "properties": {
+        "type": {
+          "const": "mcp",
+          "title": "Type",
+          "type": "string"
+        },
+        "server": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Server",
+          "type": "string"
+        },
+        "tool": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "server",
+        "tool"
+      ],
+      "title": "McpRuntime",
+      "type": "object"
+    },
+    "OutputPort": {
+      "additionalProperties": false,
+      "description": "Выход блока.\n\nУ универсальных блоков тип выхода вычисляется для каждого узла: `same_as` — повторяет\nтип того, что подано на указанный вход; `from_config` — записан в указанной настройке.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/PortType"
+        },
+        "of": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Of"
+        },
+        "list": {
+          "default": false,
+          "title": "List",
+          "type": "boolean"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema"
+        },
+        "same_as": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Same As"
+        },
+        "from_config": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Config"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "title"
+      ],
+      "title": "OutputPort",
+      "type": "object"
+    },
+    "PortType": {
+      "description": "Восемь видов данных, которые ходят между блоками.",
+      "enum": [
+        "Event",
+        "Data",
+        "File",
+        "Text",
+        "Task",
+        "Answer",
+        "Verdict",
+        "Hint"
+      ],
+      "title": "PortType",
+      "type": "string"
+    },
+    "PythonRuntime": {
+      "additionalProperties": false,
+      "description": "Встроенный блок: функция `run` в пакете Python, записанная как «модуль:функция».",
+      "properties": {
+        "type": {
+          "const": "python",
+          "title": "Type",
+          "type": "string"
+        },
+        "entrypoint": {
+          "pattern": "^[a-z_][a-z0-9_.]*:[a-z_][a-z0-9_]*$",
+          "title": "Entrypoint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "entrypoint"
+      ],
+      "title": "PythonRuntime",
+      "type": "object"
+    },
+    "ScreenType": {
+      "enum": [
+        "answer_form",
+        "confirm_recognized",
+        "review_table",
+        "review_document"
+      ],
+      "title": "ScreenType",
+      "type": "string"
+    },
+    "ToolRef": {
+      "additionalProperties": false,
+      "description": "MCP-инструмент, который разрешено вызывать агенту внутри блока. Только чтение.",
+      "properties": {
+        "server": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Server",
+          "type": "string"
+        },
+        "tool": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "tool"
+      ],
+      "title": "ToolRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "title": "Version",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "author": {
+      "title": "Author",
+      "type": "string"
+    },
+    "category": {
+      "$ref": "#/$defs/Category"
+    },
+    "kind": {
+      "$ref": "#/$defs/Kind",
+      "default": "auto"
+    },
+    "screen": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScreenType"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "inputs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/InputPort"
+      },
+      "title": "Inputs",
+      "type": "array"
+    },
+    "outputs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OutputPort"
+      },
+      "title": "Outputs",
+      "type": "array"
+    },
+    "config": {
+      "additionalProperties": true,
+      "title": "Config",
+      "type": "object"
+    },
+    "outcomes": {
+      "default": [
+        "ok"
+      ],
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Outcomes",
+      "type": "array"
+    },
+    "runtime": {
+      "discriminator": {
+        "mapping": {
+          "http": "#/$defs/HttpRuntime",
+          "mcp": "#/$defs/McpRuntime",
+          "python": "#/$defs/PythonRuntime"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PythonRuntime"
+        },
+        {
+          "$ref": "#/$defs/McpRuntime"
+        },
+        {
+          "$ref": "#/$defs/HttpRuntime"
+        }
+      ],
+      "title": "Runtime"
+    },
+    "tools": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ToolRef"
+      },
+      "title": "Tools",
+      "type": "array"
+    },
+    "side_effects": {
+      "default": false,
+      "title": "Side Effects",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "name",
+    "description",
+    "author",
+    "category",
+    "runtime"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}

@@ -1,0 +1,150 @@
+{
+  "format": 1,
+  "id": "scenario_4_analytics",
+  "name": "Аналитика и рассылки",
+  "description": "Раз в неделю собираются результаты группы, преподаватель получает сводку, ученики — персональные рекомендации после подтверждения.",
+  "params": [
+    {"name": "group_id", "title": "Группа", "type": "string"},
+    {"name": "course_id", "title": "Курс Moodle", "type": "integer"}
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "title": "По пятницам в 18:00",
+      "launches": [{"type": "schedule", "cron": "0 18 * * 5"}]
+    },
+    {
+      "id": "get_results",
+      "type": "block",
+      "block": "source.platform_results",
+      "title": "Результаты группы за неделю",
+      "config": {"group_id": {"$param": "group_id"}, "period_days": 7}
+    },
+    {
+      "id": "get_grades",
+      "type": "block",
+      "block": "source.moodle_grades",
+      "title": "Оценки из Moodle",
+      "config": {"course_id": {"$param": "course_id"}}
+    },
+    {
+      "id": "analyze",
+      "type": "block",
+      "block": "ai_process.generate",
+      "title": "Найти отстающих и типичные ошибки",
+      "config": {
+        "prompt": "Найди отстающих, типичные ошибки и темы для повторения.",
+        "result": {"type": "Data", "of": "group_analysis"}
+      },
+      "inputs": {"data": "get_results.results", "context": "get_grades.grades"}
+    },
+    {
+      "id": "digest",
+      "type": "block",
+      "block": "ai_process.generate",
+      "title": "Сводка для преподавателя",
+      "config": {
+        "prompt": "Составь короткую сводку для преподавателя.",
+        "result": {"type": "Data", "of": "digest"}
+      },
+      "inputs": {"data": "analyze.result"}
+    },
+    {
+      "id": "to_teacher",
+      "type": "block",
+      "block": "sink.cabinet",
+      "title": "Сводка в кабинет преподавателя",
+      "config": {"to": "teacher", "title": "Сводка за неделю"},
+      "inputs": {"content": "digest.result"}
+    },
+    {
+      "id": "each_student",
+      "type": "for_each",
+      "title": "Для каждого ученика",
+      "over": "get_results.results",
+      "body": {
+        "start": "write_message",
+        "nodes": [
+          {
+            "id": "write_message",
+            "type": "block",
+            "block": "ai_process.generate",
+            "title": "Персональная рекомендация",
+            "config": {
+              "prompt": "Напиши ученику короткую рекомендацию: что повторить.",
+              "result": {"type": "Data", "of": "message"}
+            },
+            "inputs": {"data": "each_student.item", "context": "analyze.result"}
+          }
+        ]
+      },
+      "collect": {"student": "each_student.item", "message": "write_message.result"},
+      "as": "personal_message"
+    },
+    {
+      "id": "review",
+      "type": "block",
+      "block": "approval.review_table",
+      "title": "Преподаватель подтверждает рассылку",
+      "inputs": {"items": "each_student.results"}
+    },
+    {
+      "id": "each_approved",
+      "type": "for_each",
+      "title": "Для каждого подтверждённого сообщения",
+      "over": "review.approved",
+      "body": {
+        "start": "to_telegram",
+        "nodes": [
+          {
+            "id": "to_telegram",
+            "type": "block",
+            "block": "sink.telegram",
+            "title": "Отправить в Telegram",
+            "inputs": {
+              "content": "each_approved.item.message",
+              "recipient": "each_approved.item.student"
+            }
+          },
+          {
+            "id": "to_email",
+            "type": "block",
+            "block": "sink.email",
+            "title": "Отправить на почту",
+            "config": {"subject": "Рекомендации на неделю"},
+            "inputs": {
+              "content": "each_approved.item.message",
+              "recipient": "each_approved.item.student"
+            }
+          },
+          {
+            "id": "to_cabinet",
+            "type": "block",
+            "block": "sink.cabinet",
+            "title": "Показать в кабинете ученика",
+            "config": {"to": "recipient", "title": "Рекомендации на неделю"},
+            "inputs": {
+              "content": "each_approved.item.message",
+              "recipient": "each_approved.item.student"
+            }
+          }
+        ],
+        "transitions": [
+          {"from": "to_telegram", "when": "skipped", "to": "to_email"},
+          {"from": "to_email", "when": "skipped", "to": "to_cabinet"}
+        ]
+      }
+    }
+  ],
+  "transitions": [
+    {"from": "start", "to": "get_results"},
+    {"from": "get_results", "when": "ok", "to": "get_grades"},
+    {"from": "get_grades", "to": "analyze"},
+    {"from": "analyze", "to": "digest"},
+    {"from": "digest", "to": "to_teacher"},
+    {"from": "to_teacher", "to": "each_student"},
+    {"from": "each_student", "when": "ok", "to": "review"},
+    {"from": "review", "when": "approved", "to": "each_approved"}
+  ]
+}

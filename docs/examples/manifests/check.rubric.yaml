@@ -1,0 +1,22 @@
+# Черновик: описание блока без кода.
+id: check.rubric
+version: 0.1.0
+name: "Проверка: по рубрике с помощью ИИ"
+description: >-
+  Оценивает работу по критериям преподавателя. Вердикт предварительный: преподаватель
+  может его исправить. Рубрика берётся из задачи, а если задачи нет — из настроек.
+author: platform
+category: check
+inputs:
+  # Data без уточнения — «принимаю любое»: и ответ ученика, и текст из документа.
+  - {name: work, title: Работа, type: Data}
+  - {name: task, title: Задача с рубрикой, type: Task, required: false}
+outputs:
+  - {name: verdict, title: Предварительный вердикт, type: Verdict}
+config:
+  type: object
+  properties:
+    rubric: {title: Критерии оценки, type: string}
+    model: {title: Модель, type: string}
+outcomes: [correct, wrong]
+runtime: {type: python, entrypoint: "blocks.check.rubric:run"}

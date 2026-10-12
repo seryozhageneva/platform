@@ -1,0 +1,46 @@
+# Полный пример 2 из 3: блок-обёртка над инструментом MCP-сервера (runtime mcp).
+id: source.moodle_submissions
+version: 0.1.0
+name: "Источник: работы из Moodle"
+description: >-
+  Получает сданные работы по заданию курса Moodle. При запуске по событию берёт только
+  новые работы: уже обработанные запоминаются.
+author: platform
+category: source
+kind: auto
+
+inputs:
+  - name: event
+    title: Событие запуска
+    type: Event
+    required: false
+
+outputs:
+  # В каждом файле записано, чья это работа (student_id), имён в данных нет.
+  - name: works
+    title: Сданные работы
+    type: File
+    list: true
+
+config:
+  type: object
+  required: [course_id, assignment_id]
+  properties:
+    course_id:
+      title: Курс
+      type: integer
+    assignment_id:
+      title: Задание
+      type: integer
+
+outcomes: [ok, empty]
+
+# Ядро вызывает инструмент get_submissions сервера moodle как обычную функцию.
+# Адрес сервера и ключ берутся из подключения преподавателя, в манифесте их нет.
+runtime:
+  type: mcp
+  server: moodle
+  tool: get_submissions
+
+# Блок только читает: во внешнем мире ничего не меняется.
+side_effects: false

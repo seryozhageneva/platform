@@ -1,0 +1,10 @@
+# Черновик: описание блока без кода.
+id: sink.task_bank
+version: 0.1.0
+name: "Получатель: банк задач"
+description: Сохраняет подтверждённую задачу в банк задач платформы.
+author: platform
+category: sink
+inputs:
+  - {name: task, title: Задача, type: Task}
+runtime: {type: python, entrypoint: "blocks.sink.task_bank:run"}

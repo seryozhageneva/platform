@@ -1,0 +1,162 @@
+{
+  "format": 1,
+  "id": "scenario_2_grading",
+  "name": "Проверка работ",
+  "description": "Работы из Moodle проверяются: текст — по рубрике, код — тестами. Преподаватель подтверждает таблицу, оценки уходят в Moodle и на почту.",
+  "params": [
+    {"name": "course_id", "title": "Курс Moodle", "type": "integer"},
+    {"name": "assignment_id", "title": "Задание Moodle", "type": "integer"},
+    {"name": "task_id", "title": "Задача платформы с рубрикой и тестами", "type": "string"}
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "title": "Сдана работа или наступил срок",
+      "launches": [
+        {"type": "moodle_event", "settings": {"poll_minutes": 5}},
+        {"type": "schedule", "cron": "0 20 * * *"}
+      ]
+    },
+    {
+      "id": "get_task",
+      "type": "block",
+      "block": "source.task_bank",
+      "title": "Взять рубрику и тесты задания",
+      "config": {"task_id": {"$param": "task_id"}, "adapt": false}
+    },
+    {
+      "id": "get_works",
+      "type": "block",
+      "block": "source.moodle_submissions",
+      "title": "Получить сданные работы",
+      "config": {
+        "course_id": {"$param": "course_id"},
+        "assignment_id": {"$param": "assignment_id"}
+      },
+      "inputs": {"event": "start.event"}
+    },
+    {
+      "id": "each_work",
+      "type": "for_each",
+      "title": "Для каждой работы",
+      "over": "get_works.works",
+      "body": {
+        "start": "by_kind",
+        "nodes": [
+          {
+            "id": "by_kind",
+            "type": "switch",
+            "title": "Что сдано: документ или код",
+            "value": "each_work.item",
+            "field": "kind"
+          },
+          {
+            "id": "extract",
+            "type": "block",
+            "block": "transform.document_to_text",
+            "title": "Извлечь текст",
+            "inputs": {"file": "each_work.item"}
+          },
+          {
+            "id": "extract_code",
+            "type": "block",
+            "block": "transform.extract_code",
+            "title": "Извлечь код",
+            "inputs": {"file": "each_work.item"}
+          },
+          {
+            "id": "check_text",
+            "type": "block",
+            "block": "check.rubric",
+            "title": "Проверить текст по рубрике",
+            "inputs": {"work": "extract.text", "task": "get_task.task"}
+          },
+          {
+            "id": "check_code",
+            "type": "block",
+            "block": "check.code_tests",
+            "title": "Проверить код тестами",
+            "inputs": {"task": "get_task.task", "answer": "extract_code.answer"}
+          },
+          {
+            "id": "comment",
+            "type": "block",
+            "block": "ai_process.generate",
+            "title": "Написать комментарий",
+            "config": {
+              "prompt": "Напиши студенту комментарий к работе по вердикту проверки.",
+              "result": {"type": "Data", "of": "feedback"}
+            },
+            "inputs": {
+              "data": ["extract.text", "extract_code.answer"],
+              "context": ["check_text.verdict", "check_code.verdict"]
+            }
+          }
+        ],
+        "transitions": [
+          {"from": "by_kind", "when": "document", "to": "extract"},
+          {"from": "by_kind", "when": "code", "to": "extract_code"},
+          {"from": "extract", "when": "ok", "to": "check_text"},
+          {"from": "extract_code", "when": "ok", "to": "check_code"},
+          {"from": "check_text", "to": "comment"},
+          {"from": "check_code", "to": "comment"}
+        ]
+      },
+      "collect": {
+        "work": "each_work.item",
+        "verdict": ["check_text.verdict", "check_code.verdict"],
+        "comment": "comment.result"
+      },
+      "as": "graded_work"
+    },
+    {
+      "id": "review",
+      "type": "block",
+      "block": "approval.review_table",
+      "title": "Преподаватель подтверждает оценки",
+      "inputs": {"items": "each_work.results"}
+    },
+    {
+      "id": "each_approved",
+      "type": "for_each",
+      "title": "Для каждой подтверждённой работы",
+      "over": "review.approved",
+      "body": {
+        "start": "to_moodle",
+        "nodes": [
+          {
+            "id": "to_moodle",
+            "type": "block",
+            "block": "sink.moodle_grades",
+            "title": "Выставить оценку в Moodle",
+            "inputs": {
+              "work": "each_approved.item.work",
+              "verdict": "each_approved.item.verdict",
+              "comment": "each_approved.item.comment"
+            }
+          },
+          {
+            "id": "to_email",
+            "type": "block",
+            "block": "sink.email",
+            "title": "Отправить письмо студенту",
+            "config": {"subject": "Результат проверки работы"},
+            "inputs": {
+              "content": "each_approved.item.comment",
+              "recipient": "each_approved.item.work"
+            }
+          }
+        ],
+        "transitions": [{"from": "to_moodle", "to": "to_email"}]
+      }
+    }
+  ],
+  "transitions": [
+    {"from": "start", "to": "get_task"},
+    {"from": "get_task", "when": "ok", "to": "get_works"},
+    {"from": "get_works", "when": "ok", "to": "each_work"},
+    {"from": "each_work", "when": "ok", "to": "review"},
+    {"from": "review", "when": "approved", "to": "each_approved"}
+  ]
+}

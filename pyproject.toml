@@ -6,7 +6,11 @@ name = "edu-pipelines-platform"
 version = "0.1.0"
 description = "Платформа для построения персонализированных учебных пайплайнов на основе ИИ-агентов"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "jsonschema>=4.26.0",
+    "pydantic>=2.14.1",
+    "pyyaml>=6.0.3",
+]
 
 [tool.uv]
 # Проект не собирается в устанавливаемый пакет: код запускается прямо из папки репозитория.

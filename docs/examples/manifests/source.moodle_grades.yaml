@@ -1,0 +1,19 @@
+# Черновик: описание блока без кода.
+id: source.moodle_grades
+version: 0.1.0
+name: "Источник: оценки из Moodle"
+description: Получает журнал оценок курса Moodle.
+author: platform
+category: source
+outputs:
+  - name: grades
+    title: Оценки курса
+    type: Data
+    of: moodle_grade
+    list: true
+config:
+  type: object
+  required: [course_id]
+  properties:
+    course_id: {title: Курс, type: integer}
+runtime: {type: mcp, server: moodle, tool: get_grades}

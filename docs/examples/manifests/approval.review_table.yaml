@@ -1,0 +1,18 @@
+# Черновик: описание блока без кода.
+id: approval.review_table
+version: 0.1.0
+name: "Подтверждение: таблица"
+description: >-
+  Показывает преподавателю все элементы одной таблицей. Строку можно поправить или
+  пропустить; пропущенный элемент дальше не идёт.
+author: platform
+category: approval
+kind: approval
+screen: review_table
+inputs:
+  - {name: items, title: Что подтвердить, type: Data, list: true}
+outputs:
+  # Тот же тип, что подан на вход: подтверждённые элементы с правками преподавателя.
+  - {name: approved, title: Подтверждённое, type: Data, same_as: items}
+outcomes: [approved, rejected]
+runtime: {type: python, entrypoint: "blocks.approval.review_table:run"}
