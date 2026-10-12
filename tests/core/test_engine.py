@@ -333,6 +333,65 @@ def test_state_that_cannot_be_saved_stops_the_run(store, blocks, pipeline, calls
     assert nodes_called(calls) == ["make", "upper", "keep"]
 
 
+def test_error_text_the_store_rejects_is_cleaned(strict_store, blocks, pipeline):
+    """Блок процитировал в ошибке текст с нулевым символом: статус «ошибка» всё равно сохранён."""
+
+    async def broken(inputs, config, context):
+        raise ValueError("не разобрать текст: при\x00вет и \ud800")
+
+    blocks = with_run(blocks, "transform.fake_upper", broken)
+    state = start(Engine(strict_store, blocks), pipeline)
+
+    reason = "блок «transform.fake_upper» упал: ValueError: не разобрать текст: при\ufffdвет и ?"
+    assert state.status is RunStatus.ERROR
+    assert state.error == f"узел «upper»: {reason}"
+    assert asyncio.run(strict_store.load("run-1")) == state
+    assert strict_store.journal[-1] == ("upper", "node_failed", {"error": reason})
+
+
+def test_error_text_that_cannot_be_saved_is_replaced_by_a_short_one(store, blocks, pipeline):
+    save = store.save
+
+    async def picky_save(state):
+        if state.error and "модель недоступна" in state.error:
+            raise RuntimeError("хранилище не приняло текст ошибки")
+        await save(state)
+
+    store.save = picky_save
+
+    async def broken(inputs, config, context):
+        raise RuntimeError("модель недоступна")
+
+    state = start(Engine(store, with_run(blocks, "transform.fake_upper", broken)), pipeline)
+
+    assert state.status is RunStatus.ERROR
+    assert state.error == "узел «upper»: текст ошибки не удалось сохранить (RuntimeError)"
+    assert state.current == ["upper"]
+    assert asyncio.run(store.load("run-1")) == state
+
+
+@pytest.mark.parametrize("node", ["make", "keep"], ids=["middle_node", "last_node"])
+def test_block_events_the_store_rejects_do_not_break_the_run(strict_store, blocks, pipeline, node):
+    """Журнал не принял событие блока: шаг уже сохранён, запуск идёт дальше, потеря отмечена."""
+    block_id = {"make": "source.fake_text", "keep": "sink.fake_keep"}[node]
+    run = blocks[block_id].run
+
+    async def with_bad_event(inputs, config, context):
+        done = await run(inputs, config, context)
+        return done.model_copy(update={"events": [BlockEvent(type="note", data={"t": "\x00"})]})
+
+    state = start(Engine(strict_store, with_run(blocks, block_id, with_bad_event)), pipeline)
+
+    assert state.status is RunStatus.DONE
+    assert asyncio.run(strict_store.load("run-1")) == state
+    kinds = [(at, kind) for at, kind, _ in strict_store.journal]
+    assert (node, "note") not in kinds
+    lost = kinds.index((node, "events_lost"))
+    assert strict_store.journal[lost][2] == {"count": 1, "reason": "RuntimeError"}
+    assert kinds[lost + 1] == (node, "node_done")
+    assert kinds[-1] == ("keep", "run_done")
+
+
 def test_finished_run_is_not_executed_again(store, blocks, pipeline, calls):
     done = start(Engine(store, blocks), pipeline)
 

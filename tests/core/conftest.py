@@ -62,6 +62,25 @@ class MemoryRunStore:
             self.journal.append((node_id, event.type, event.model_dump(mode="json")["data"]))
 
 
+class StrictMemoryRunStore(MemoryRunStore):
+    """Как PostgreSQL: текст с нулевым символом не записывает ни в состояние, ни в журнал."""
+
+    async def save(self, state: RunState) -> None:
+        if "\\u0000" in state.model_dump_json():
+            raise RuntimeError("хранилище не записывает нулевой символ")
+        await super().save(state)
+
+    async def append_events(self, run_id: str, node_id: str, events: list[BlockEvent]) -> None:
+        if any("\\u0000" in event.model_dump_json() for event in events):
+            raise RuntimeError("хранилище не записывает нулевой символ")
+        await super().append_events(run_id, node_id, events)
+
+
+@pytest.fixture
+def strict_store() -> StrictMemoryRunStore:
+    return StrictMemoryRunStore()
+
+
 @pytest.fixture
 def manifest_for():
     """Манифест для фейкового блока, которого нет среди трёх готовых."""

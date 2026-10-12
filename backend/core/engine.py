@@ -123,18 +123,18 @@ class Engine:
         while state.current:
             node_id = state.current[0]
             try:
-                outputs, outcome, events = await self._step(nodes.get(node_id), state)
+                outputs, outcome, block_events = await self._step(nodes.get(node_id), state)
             except NodeFailed as failure:
                 return await self._fail(state, node_id, str(failure))
             before = state.ports.get(node_id)
             state.ports[node_id] = {**(before or {}), **outputs}
             target = _next(pipeline.transitions, node_id, outcome)
             state.current = [target] if target else []
-            events = [*events, BlockEvent(type="node_done", data={"outcome": outcome})]
+            own_events = [BlockEvent(type="node_done", data={"outcome": outcome})]
             if not target:
                 # Подходящего перехода нет — ветка, а с ней и запуск, на этом заканчивается.
                 state.status = RunStatus.DONE
-                events.append(BlockEvent(type="run_done"))
+                own_events.append(BlockEvent(type="run_done"))
             try:
                 # Состояние сохраняется после каждого узла: при сбое теряется не больше шага.
                 await self._store.save(state)
@@ -150,20 +150,47 @@ class Engine:
                     state.ports[node_id] = before
                 reason = f"не удалось сохранить состояние после узла ({type(error).__name__})"
                 return await self._fail(state, node_id, reason)
-            await self._store.append_events(state.run_id, node_id, events)
+            await self._journal(state.run_id, node_id, block_events, own_events)
         return state
 
     async def _fail(self, state: RunState, node_id: str, reason: str) -> RunState:
         """Останавливает запуск со статусом «ошибка».
 
-        Текущий узел остаётся на месте: с него запуск можно будет продолжить. Если не
-        сохраняется и это — хранилище недоступно, и исключение уходит вызывающему.
+        Текущий узел остаётся на месте: с него запуск можно будет продолжить.
         """
+        reason = _storable(reason)
         state.status, state.error = RunStatus.ERROR, f"узел «{node_id}»: {reason}"
-        await self._store.save(state)
+        try:
+            await self._store.save(state)
+        except Exception as error:
+            # Хранилище не приняло сам текст ошибки. Сохраняется короткий: главное, чтобы
+            # запуск не остался «выполняться». Не вышло и это — хранилище недоступно, и
+            # исключение уходит вызывающему.
+            reason = f"текст ошибки не удалось сохранить ({type(error).__name__})"
+            state.error = f"узел «{node_id}»: {reason}"
+            await self._store.save(state)
         failed = BlockEvent(type="node_failed", data={"error": reason})
-        await self._store.append_events(state.run_id, node_id, [failed])
+        await self._journal(state.run_id, node_id, [], [failed])
         return state
+
+    async def _journal(
+        self, run_id: str, node_id: str, block_events: list[BlockEvent], own: list[BlockEvent]
+    ) -> None:
+        """Дописывает в журнал события блока и следом — события самого движка.
+
+        Состояние к этому моменту уже сохранено, поэтому шаг из-за журнала не отменяется.
+        Если хранилище не приняло события блока, в журнале остаётся отметка о потере.
+        """
+        try:
+            await self._store.append_events(run_id, node_id, [*block_events, *own])
+        except Exception as error:
+            if not block_events:
+                raise
+            lost = BlockEvent(
+                type="events_lost",
+                data={"count": len(block_events), "reason": type(error).__name__},
+            )
+            await self._store.append_events(run_id, node_id, [lost, *own])
 
     async def _step(
         self, node: Any, state: RunState
@@ -203,6 +230,15 @@ class Engine:
 
         outputs = _checked_outputs(block.manifest, result)
         return outputs, result.outcome, result.events
+
+
+def _storable(text: str) -> str:
+    """Текст без символов, которые не записываются в базу: нулевого и «битых» (ADR 0007).
+
+    Такие символы попадают в текст ошибки, когда блок цитирует в ней свои данные —
+    например, текст, извлечённый из PDF.
+    """
+    return text.replace("\x00", "\ufffd").encode("utf-8", "replace").decode("utf-8")
 
 
 def _fill_params(pipeline: Pipeline, given: Mapping[str, Any]) -> dict[str, Any]:

@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime
 
 from backend.core.contracts.ports import Event, TriggerType
-from backend.core.contracts.run import Done
+from backend.core.contracts.run import BlockEvent, Done
 from backend.core.contracts.state import RunStatus
 from backend.core.engine import Engine, LoadedBlock
 from backend.models.pipelines import PipelineRepository
@@ -122,5 +122,67 @@ def test_output_the_database_rejects_stops_the_run(sessions, teacher, blocks, pi
         state = await Engine(PgRunStore(sessions), blocks).resume(pipeline, run_id)
         assert state.status is RunStatus.DONE
         assert [node for node, *_ in calls] == ["make", "upper", "keep"]
+
+    asyncio.run(scenario())
+
+
+def test_error_text_the_database_rejects_still_stops_the_run(sessions, teacher, blocks, pipeline):
+    """Блок процитировал в ошибке текст с нулевым символом: в базе всё равно статус «ошибка»."""
+    run_id = str(uuid.uuid4())
+
+    async def broken(inputs, config, context):
+        raise ValueError("не разобрать текст: при\x00вет")
+
+    upper = blocks["transform.fake_upper"]
+    with_broken = {**blocks, "transform.fake_upper": LoadedBlock(upper.manifest, broken)}
+
+    async def scenario():
+        saved = await PipelineRepository(sessions).create(teacher.id, pipeline)
+        failed = await Engine(PgRunStore(sessions), with_broken).start(
+            pipeline, run_id=run_id, pipeline_id=str(saved.id), pipeline_version=1, event=EVENT
+        )
+        assert failed.status is RunStatus.ERROR
+
+        store = PgRunStore(sessions)
+        assert await store.load(run_id) == failed
+        async with sessions() as session:
+            row = await session.get(RunRow, uuid.UUID(run_id))
+        assert row.status == RunStatus.ERROR
+        assert row.error.endswith("ValueError: не разобрать текст: при\ufffdвет")
+        assert [event.type for event in await store.events(run_id)][-1] == "node_failed"
+
+        state = await Engine(PgRunStore(sessions), blocks).resume(pipeline, run_id)
+        assert state.status is RunStatus.DONE
+
+    asyncio.run(scenario())
+
+
+def test_block_event_the_database_rejects_does_not_break_the_run(
+    sessions, teacher, blocks, pipeline
+):
+    run_id = str(uuid.uuid4())
+    keep = blocks["sink.fake_keep"]
+
+    async def with_bad_event(inputs, config, context):
+        done = await keep.run(inputs, config, context)
+        return done.model_copy(update={"events": [BlockEvent(type="note", data={"t": "\x00"})]})
+
+    with_bad = {**blocks, "sink.fake_keep": LoadedBlock(keep.manifest, with_bad_event)}
+
+    async def scenario():
+        saved = await PipelineRepository(sessions).create(teacher.id, pipeline)
+        state = await Engine(PgRunStore(sessions), with_bad).start(
+            pipeline, run_id=run_id, pipeline_id=str(saved.id), pipeline_version=1, event=EVENT
+        )
+        assert state.status is RunStatus.DONE
+
+        store = PgRunStore(sessions)
+        assert await store.load(run_id) == state
+        journal = [(event.node_id, event.type) for event in await store.events(run_id)]
+        assert journal[-3:] == [
+            ("keep", "events_lost"),
+            ("keep", "node_done"),
+            ("keep", "run_done"),
+        ]
 
     asyncio.run(scenario())
