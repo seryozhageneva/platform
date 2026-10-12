@@ -2,6 +2,9 @@
 
 Тесты идут на базе `platform_test` в том же контейнере PostgreSQL: она создаётся перед
 тестами и удаляется после. Рабочая база `platform` не затрагивается. Данные — выдуманные.
+
+Лежит в корне `tests/`: базой пользуются и тесты репозиториев (`tests/models/`), и тест
+движка с настоящим хранилищем (`tests/core/test_engine_db.py`).
 """
 
 import asyncio
@@ -20,7 +23,7 @@ from backend.models.db import Sessions, database_url, make_engine, make_sessions
 from backend.models.tables import Base, UserRow
 from backend.models.users import UserRepository
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 TEST_DB = "platform_test"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
