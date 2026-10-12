@@ -10,12 +10,15 @@ permissions:
   contents: read
 
 jobs:
-  # Код: оформление, линтер, правила импортов, тесты.
+  # Код: оформление, линтер, правила импортов, миграции, тесты.
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
+      # Тестам репозиториев нужна база. Она каждый раз новая и пустая.
+      - name: Случайный пароль базы на один прогон
+        run: echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > .env
       - name: Установить библиотеки
         run: uv sync --locked
       - name: Оформление кода
@@ -24,8 +27,15 @@ jobs:
         run: uv run ruff check .
       - name: Правила импортов
         run: uv run lint-imports
+      - name: Поднять базу и дождаться готовности
+        run: docker compose up -d --wait postgres
+      - name: Применить миграции на чистой базе
+        run: uv run alembic upgrade head
       - name: Тесты
         run: uv run pytest
+      - name: Остановить базу
+        if: always()
+        run: docker compose down -v
 
   # Сервисы: база и очередь поднимаются командой docker compose up.
   services:

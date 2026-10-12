@@ -43,7 +43,8 @@ uv sync                          установить библиотеки в .v
 docker compose up -d --wait      поднять PostgreSQL и Redis и дождаться готовности
 docker compose ps                состояние сервисов
 docker compose down              остановить сервисы (данные базы сохраняются)
-uv run pytest                    тесты
+uv run alembic upgrade head      применить миграции к базе (после правки backend/models/tables.py нужна новая миграция)
+uv run pytest                    тесты; тестам базы нужен запущенный PostgreSQL, они идут на отдельной базе platform_test
 uv run ruff format --check .     проверка оформления кода
 uv run ruff check .              линтер
 uv run lint-imports              правила импортов из .importlinter (ADR 0003, 0006)
