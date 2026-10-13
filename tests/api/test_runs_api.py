@@ -147,6 +147,16 @@ def test_misspelled_field_in_the_launch_request_is_refused(client, me, sessions)
     assert runs_in_the_database(sessions) == 0
 
 
+def test_param_the_database_cannot_store_is_refused_not_crashed(client, me, sessions):
+    pipeline_id = saved(client, me, THREE_FAKES)
+
+    refused = launch(client, me, pipeline_id, phrase="лога\x00рифмы")
+
+    assert refused.status_code == 422
+    assert "нулевой символ" in refused.json()["message"]
+    assert runs_in_the_database(sessions) == 0
+
+
 def test_block_that_cannot_be_called_yet_is_not_started(client, me, sessions):
     """Блок `mcp` виден валидатору, но MCP-клиента ещё нет: запуск не начинается."""
     pipeline_id = saved(client, me, chain(("mail", "sink.fake_mail")))

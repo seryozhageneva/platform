@@ -53,6 +53,8 @@ def test_fitting_value_is_accepted(param, value):
         (SHARE, "половина", "число"),
         (SHARE, True, "число"),
         (HINTS, 1, "да или нет (true/false)"),
+        # «Не число» и бесконечность база не хранит.
+        (SHARE, float("inf"), "число"),
     ],
 )
 def test_value_of_a_wrong_type_is_explained(param, value, expected):

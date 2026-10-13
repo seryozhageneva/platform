@@ -64,13 +64,15 @@ def _tagging(block: LoadedBlock) -> LoadedBlock:
 async def open_assembly() -> AsyncIterator[Assembly]:
     """Сборка по настройкам из `.env`: рабочая база, встроенные блоки, выбранная модель."""
     engine = make_engine()
-    sessions = make_sessions(engine)
-    llm = make_llm(call_log=LLMCallRepository(sessions))
-    registry = load_registry(BUILTIN_BLOCKS)
-    for problem in registry.problems:
-        logger.warning("блок не загружен: %s", problem)
     try:
-        yield Assembly(sessions, registry, llm)
+        sessions = make_sessions(engine)
+        llm = make_llm(call_log=LLMCallRepository(sessions))
+        try:
+            registry = load_registry(BUILTIN_BLOCKS)
+            for problem in registry.problems:
+                logger.warning("блок не загружен: %s", problem)
+            yield Assembly(sessions, registry, llm)
+        finally:
+            await llm.aclose()
     finally:
-        await llm.aclose()
         await engine.dispose()

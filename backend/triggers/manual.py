@@ -5,6 +5,7 @@
 причин; запуск при этом не создаётся.
 """
 
+import math
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -25,6 +26,10 @@ _TYPE_NAMES = {
     ParamType.NUMBER: "число",
     ParamType.BOOLEAN: "да или нет (true/false)",
 }
+
+
+class PipelineNotFound(Exception):
+    """Такого пайплайна у этого преподавателя нет."""
 
 
 class LaunchRefused(Exception):
@@ -49,7 +54,7 @@ async def start_manual(
     row = await assembly.pipelines.get(teacher_id, pipeline_id)
     pipeline = None if row is None else await assembly.pipelines.load(row.id, row.latest_version)
     if row is None or pipeline is None:
-        raise LookupError("пайплайн не найден")
+        raise PipelineNotFound("пайплайн не найден")
     # Незаполненное значение — то же, что его отсутствие: тогда берётся значение по умолчанию.
     given = {name: value for name, value in (params or {}).items() if value is not None}
     problems = launch_problems(assembly, pipeline, TriggerType.MANUAL, given)
@@ -112,6 +117,10 @@ def param_problems(pipeline: Pipeline, given: Mapping[str, Any]) -> list[str]:
 
 def _fits(param: Param, value: Any) -> bool:
     """Подходит ли значение под тип параметра — по тому же правилу, что и значение по умолчанию."""
+    # «Не число» и бесконечность база не хранит: в состоянии запуска они стали бы пустым
+    # значением (ADR 0007), и блок получил бы «ничего» вместо числа.
+    if isinstance(value, float) and not math.isfinite(value):
+        return False
     try:
         Param(name=param.name, title=param.title, type=param.type, default=value)
     except ValidationError:

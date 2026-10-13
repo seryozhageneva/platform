@@ -1,9 +1,12 @@
 """Эндпоинты пайплайнов: сохранение с проверкой валидатором, версии, «каждый видит своё»."""
 
+import asyncio
 import copy
 import uuid
 
 from api_fakes import THREE_FAKES, chain, saved
+
+from backend.models.users import UserRepository
 
 API = "/api/v1"
 
@@ -119,10 +122,6 @@ def test_request_must_say_who_is_asking(client, me, sessions):
 
 
 def test_student_is_not_accepted_as_a_teacher(client, me, teacher, sessions):
-    import asyncio
-
-    from backend.models.users import UserRepository
-
     student = asyncio.run(UserRepository(sessions).create_student(teacher.id, name="Ученик 1"))
 
     refused = client.get(f"{API}/pipelines", headers={"X-Teacher-Id": str(student.id)})
@@ -146,3 +145,14 @@ def test_unknown_pipeline_is_not_found(client, me):
     assert missing.status_code == 404
     assert missing.json() == {"message": "пайплайн не найден", "problems": []}
     assert client.get(f"{API}/pipelines/не-номер", headers=me).status_code == 422
+
+
+def test_text_the_database_cannot_store_is_refused_not_crashed(client, me):
+    """Нулевой символ встречается в тексте, скопированном из PDF; база его не записывает."""
+    with_nul = {**copy.deepcopy(THREE_FAKES), "name": "Лекция\x00 1"}
+
+    refused = client.post(f"{API}/pipelines", json=with_nul, headers=me)
+
+    assert refused.status_code == 422
+    assert "нулевой символ" in refused.json()["message"]
+    assert client.get(f"{API}/pipelines", headers=me).json() == []

@@ -3,6 +3,10 @@
 Из описания OpenAPI фронтенд получит свои типы (задача 13), поэтому оно проверяется уже здесь.
 """
 
+from fastapi.testclient import TestClient
+
+from backend.api.app import create_app
+
 API = "/api/v1"
 
 
@@ -44,6 +48,8 @@ def test_refusals_of_the_server_itself_look_like_all_the_others(client, me):
 
     wrong_method = client.delete(f"{API}/pipelines", headers=me)
     assert wrong_method.status_code == 405
+    # В заголовке — какие методы адрес принимает; его составляет сам FastAPI.
+    assert "POST" in wrong_method.headers["allow"]
     assert wrong_method.json() == {
         "message": "этот адрес не принимает такой запрос",
         "problems": [],
@@ -54,3 +60,12 @@ def test_refusals_of_the_server_itself_look_like_all_the_others(client, me):
     )
     assert not_json.status_code == 422
     assert not_json.json() == {"message": "тело запроса — не JSON", "problems": []}
+
+
+def test_server_starts_by_the_settings_and_shuts_down(monkeypatch):
+    """Старт по настройкам: встроенные блоки, модель-заглушка. К базе запрос не обращается."""
+    monkeypatch.setenv("LLM_PROVIDER", "fake")
+
+    with TestClient(create_app()) as started:
+        assert started.get(f"{API}/health").json() == {"status": "ok"}
+        assert started.get(f"{API}/pipelines").status_code == 401

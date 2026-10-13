@@ -14,7 +14,7 @@ from backend.api.schemas import EventOut, LaunchRequest, RunOut
 from backend.core.contracts.state import RunState
 from backend.models.tables import UserRow
 from backend.triggers.assembly import Assembly
-from backend.triggers.manual import LaunchRefused, start_manual
+from backend.triggers.manual import LaunchRefused, PipelineNotFound, start_manual
 
 router = APIRouter(tags=["Запуски"], responses=REFUSALS)
 
@@ -30,7 +30,7 @@ async def launch_manually(
             pipeline_id=pipeline_id,
             params=body.params if body else {},
         )
-    except LookupError as error:
+    except PipelineNotFound as error:
         raise ApiError(404, str(error)) from None
     except LaunchRefused as refused:
         raise ApiError(422, str(refused), refused.problems) from None
