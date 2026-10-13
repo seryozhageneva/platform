@@ -5,13 +5,15 @@
 """
 
 import asyncio
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from backend.core.contracts.manifest import Manifest, parse_manifest
+from backend.core.contracts.manifest import Manifest, load_manifest, parse_manifest
 from backend.core.contracts.pipeline import Pipeline, parse_pipeline
 from backend.core.contracts.ports import Event, TriggerType
 from backend.core.contracts.run import BlockEvent, Done, RunContext, Waiting
@@ -372,3 +374,26 @@ def files(add_block):
         return {"id": "get", "type": "block", "block": "source.fake_files", "config": config}
 
     return node
+
+
+# --- Для тестов реестра и валидатора -------------------------------------------------------
+
+EXAMPLES = Path(__file__).resolve().parents[2] / "docs" / "examples"
+
+
+@pytest.fixture
+def example_manifests() -> dict[str, Manifest]:
+    """Манифесты из `docs/examples/manifests/` — свежий словарь, который тест может менять."""
+    loaded = [load_manifest(path) for path in sorted((EXAMPLES / "manifests").glob("*.yaml"))]
+    return {manifest.id: manifest for manifest in loaded}
+
+
+@pytest.fixture
+def scenario():
+    """Сценарий по номеру как словарь — свежая копия, которую тест может портить."""
+
+    def load(number: int) -> dict[str, Any]:
+        (path,) = (EXAMPLES / "pipelines").glob(f"scenario-{number}-*.json")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    return load
