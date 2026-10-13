@@ -18,6 +18,7 @@ TABLES = {
     "assignments",
     "runs",
     "events",
+    "llm_calls",
 }
 
 

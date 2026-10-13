@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Корневой сертификат для GigaChat: скачивается с Госуслуг, путь к нему — в .env (ADR 0012)
+certs/
+
 # Python
 __pycache__/
 *.py[cod]
