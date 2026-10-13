@@ -2,6 +2,7 @@
 
 Это проверка критерия задачи 04 «состояние в БД». Движок базу не подключает: готовое
 хранилище `PgRunStore` ему передаёт тест — так же, как в платформе это сделает слой сборки.
+Последний тест — то же для задачи 05: пауза и «для каждого» переживают запись в базу.
 """
 
 import asyncio
@@ -185,5 +186,70 @@ def test_block_event_the_database_rejects_does_not_break_the_run(
             ("keep", "node_done"),
             ("keep", "run_done"),
         ]
+
+    asyncio.run(scenario())
+
+
+def test_pause_inside_for_each_survives_in_the_database(
+    sessions, teacher, blocks, graph, files, for_each_body, ask, answer_with
+):
+    """Запуск ждёт ученика посреди списка: всё, что нужно для продолжения, лежит в базе."""
+    run_id = str(uuid.uuid4())
+    question = {"id": "ask", "type": "block", "block": "student.fake_ask"}
+    pipeline = graph(
+        [
+            files("a.txt", "b.txt"),
+            {
+                "id": "each",
+                "type": "for_each",
+                "over": "get.files",
+                "body": for_each_body("ask", [{**question, "limit": {"max": 1}}]),
+                "collect": "ask.answer",
+            },
+        ],
+        [("get", None, "each")],
+    )
+
+    async def scenario():
+        saved = await PipelineRepository(sessions).create(teacher.id, pipeline)
+        waiting = await Engine(PgRunStore(sessions), blocks).start(
+            pipeline, run_id=run_id, pipeline_id=str(saved.id), pipeline_version=1, event=EVENT
+        )
+        assert waiting.status is RunStatus.WAITING
+
+        # Новое хранилище — как после перезапуска сервера.
+        assert await PgRunStore(sessions).load(run_id) == waiting
+        async with sessions() as session:
+            row = await session.get(RunRow, uuid.UUID(run_id))
+        assert row.status == RunStatus.WAITING
+        assert row.state["current"] == ["ask"]
+        assert row.state["item_index"] == {"each": 0}
+        assert row.state["waiting"][0]["node_id"] == "ask"
+        assert row.state["waiting"][0]["who"] == "student"
+
+        # Ответы принимают другие экземпляры движка: о запуске они знают только из базы.
+        second = await Engine(PgRunStore(sessions), blocks).respond(
+            pipeline, run_id, "ask", answer_with("первый")
+        )
+        assert second.status is RunStatus.WAITING and second.item_index == {"each": 1}
+        assert await PgRunStore(sessions).load(run_id) == second
+
+        done = await Engine(PgRunStore(sessions), blocks).respond(
+            pipeline, run_id, "ask", answer_with("второй")
+        )
+        assert done.status is RunStatus.DONE
+        assert await PgRunStore(sessions).load(run_id) == done
+        async with sessions() as session:
+            row = await session.get(RunRow, uuid.UUID(run_id))
+        assert row.status == RunStatus.DONE
+        assert [given["text"] for given in row.state["ports"]["each"]["results"]] == [
+            "первый",
+            "второй",
+        ]
+        assert row.state["item_index"] == {} and row.state["counters"] == {}
+
+        kinds = [event.type for event in await PgRunStore(sessions).events(run_id)]
+        assert kinds.count("node_waiting") == 2 and kinds.count("item_collected") == 2
+        assert kinds[-1] == "run_done"
 
     asyncio.run(scenario())
