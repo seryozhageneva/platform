@@ -4,7 +4,7 @@ import copy
 
 import pytest
 import yaml
-from conftest import MANIFESTS
+from contract_examples import MANIFESTS
 
 from backend.core.contracts.base import ContractError
 from backend.core.contracts.manifest import Category, Kind, load_manifest, parse_manifest

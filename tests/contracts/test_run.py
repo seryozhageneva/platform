@@ -3,7 +3,7 @@
 import asyncio
 
 import pytest
-from conftest import MANIFESTS
+from contract_examples import MANIFESTS
 from pydantic import TypeAdapter, ValidationError
 
 from backend.core.contracts.interfaces import LLMMessage, LLMResponse

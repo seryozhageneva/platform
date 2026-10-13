@@ -55,3 +55,20 @@ def test_top_level_init_files_are_empty():
     """Код в этих файлах загружается вместе с контрактами в обход правил импортов."""
     for name in ["backend/__init__.py", "backend/core/__init__.py"]:
         assert (ROOT / name).read_text().strip() == "", f"{name} должен оставаться пустым"
+
+
+def test_tests_do_not_import_conftest_by_name():
+    """Файлов `conftest.py` несколько, и по имени подключается тот, что загружен последним.
+
+    Поэтому `from conftest import ...` работает только при удачном порядке запуска. Общее
+    для тестов лежит в файле со своим именем — как `tests/llm/llm_doubles.py`.
+    """
+    guilty = [
+        str(file.relative_to(ROOT))
+        for file in (ROOT / "tests").rglob("*.py")
+        if any(
+            line.strip().startswith(("from conftest import", "import conftest"))
+            for line in file.read_text(encoding="utf-8").splitlines()
+        )
+    ]
+    assert not guilty, f"Подключают conftest по имени: {guilty}"
