@@ -1,8 +1,8 @@
-"""Движок v1: выполняет пайплайн узел за узлом и после каждого узла сохраняет состояние.
+"""Движок v2: выполняет пайплайн узел за узлом и после каждого узла сохраняет состояние.
 
-Умеет прямую цепочку блоков. Развилка, «для каждого», ограничитель цикла и пауза на человеке
-появятся в задаче 05; встретив их, движок останавливает запуск с понятной ошибкой, а не
-пропускает молча. Решения — ADR 0008.
+Умеет всё, что есть в формате пайплайна: цепочку блоков, развилку, цикл с ограничителем,
+паузу на человеке и «для каждого»; упавший автоматический блок повторяет. Решения — ADR 0008
+(шаг, сохранение, ошибки) и ADR 0010 (всё остальное).
 
 Движок знает только контракты (правило 4): хранилище, блоки и пайплайн ему передают снаружи.
 """
@@ -13,14 +13,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.core.contracts.interfaces import LLMClient
-from backend.core.contracts.manifest import Manifest
+from backend.core.contracts.manifest import Kind, Manifest
 from backend.core.contracts.pipeline import (
-    Binding,
     BlockNode,
     ForEachNode,
+    ParamRef,
     Pipeline,
     SwitchNode,
     Transition,
+    TriggerNode,
 )
 from backend.core.contracts.ports import Event, value_problems
 from backend.core.contracts.run import (
@@ -29,11 +30,25 @@ from backend.core.contracts.run import (
     Done,
     RunContext,
     Waiting,
+    response_problems,
     result_problems,
 )
-from backend.core.contracts.state import RunState, RunStatus, RunStore
+from backend.core.contracts.state import RunState, RunStatus, RunStore, WaitingFor
+from backend.core.data_flow import (
+    MISSING,
+    body_ids,
+    forget,
+    forget_output,
+    read_binding,
+    read_ref,
+    with_params,
+)
 
-NOT_YET = "движок пока не умеет {} — это появится в задаче 05"
+# Сколько раз подряд повторяется упавший автоматический блок (допущение 6 в docs/vision.md).
+MAX_RETRIES = 3
+
+# Запись для журнала: узел, события блока и следом — события самого движка.
+Note = tuple[str, list[BlockEvent], list[BlockEvent]]
 
 
 @dataclass(frozen=True)
@@ -50,6 +65,178 @@ class LoadedBlock:
 
 class NodeFailed(Exception):
     """Узел не удалось выполнить. Текст попадает в `RunState.error` и в журнал событий."""
+
+
+class ResponseRejected(ValueError):
+    """Ответ человека не принят: запуск его не ждёт или ответ не подходит экрану.
+
+    Состояние запуска при этом не меняется — человек может ответить ещё раз.
+    """
+
+
+@dataclass(frozen=True)
+class _Place:
+    """Где узел стоит в пайплайне."""
+
+    node: Any
+    # «Для каждого», в теле которого стоит узел; None — узел верхнего уровня.
+    parent: str | None
+    # Переходы того же уровня: из тела «для каждого» наружу переходов нет.
+    transitions: list[Transition]
+
+
+def _places(pipeline: Pipeline) -> dict[str, _Place]:
+    places = {}
+
+    def visit(nodes: list[Any], transitions: list[Transition], parent: str | None) -> None:
+        for node in nodes:
+            places[node.id] = _Place(node, parent, transitions)
+            if isinstance(node, ForEachNode):
+                visit(node.body.nodes, node.body.transitions, node.id)
+
+    visit(pipeline.nodes, pipeline.transitions, None)
+    return places
+
+
+class _Step:
+    """Один шаг над состоянием запуска: что записать и куда перейти.
+
+    Блоков и хранилища не касается — это делает `Engine`. Записи для журнала копятся в
+    `notes`: в журнал они попадут, только когда состояние после шага сохранено.
+    """
+
+    def __init__(self, places: Mapping[str, _Place], state: RunState) -> None:
+        self.places = places
+        self.state = state
+        self.notes: list[Note] = []
+
+    def note(self, node_id: str, kind: str, **data: Any) -> None:
+        self.notes.append((node_id, [], [BlockEvent(type=kind, data=data)]))
+
+    def finish(
+        self,
+        node_id: str,
+        outputs: Mapping[str, Any],
+        outcome: str,
+        block_events: list[BlockEvent] | None = None,
+    ) -> None:
+        """Узел отработал: записать выходы, посчитать ограничители, выбрать переход."""
+        state, place = self.state, self.places[node_id]
+        if outputs:
+            state.write(node_id, outputs)
+        # Счётчик растёт только здесь: упавший узел и узел на паузе попытку не тратят.
+        if place.node.limit is not None:
+            state.counters[node_id] = state.counters.get(node_id, 0) + 1
+        for other in self.places.values():
+            limit = getattr(other.node, "limit", None)
+            if limit is not None and limit.reset_on == node_id:
+                state.counters.pop(other.node.id, None)
+        done = BlockEvent(type="node_done", data={"outcome": outcome})
+        self.notes.append((node_id, block_events or [], [done]))
+        self.go(node_id, _next(place.transitions, node_id, outcome))
+
+    def go(self, node_id: str, target: str | None) -> None:
+        """После узла `node_id` идти к `target`; None — ветка на этом закончилась."""
+        place = self.places[node_id]
+        if target is not None:
+            self.state.current = [target]
+        elif place.parent is not None:
+            # Ветка внутри тела «для каждого» — закончился один элемент, а не запуск.
+            self._end_item(place.parent)
+        else:
+            self.state.current, self.state.status = [], RunStatus.DONE
+            self.note(node_id, "run_done")
+
+    def limit_reached(self, node: Any) -> bool:
+        """Ограничитель: узел уже пройден `max` раз — вместо него идём на `otherwise`."""
+        limit = node.limit
+        if limit is None:
+            return False
+        allowed = limit.max
+        if isinstance(allowed, ParamRef):
+            allowed = self.state.params.get(allowed.param)
+            if not isinstance(allowed, int) or isinstance(allowed, bool):
+                raise NodeFailed(f"ограничитель: в параметре «{limit.max.param}» не целое число")
+        if self.state.counters.get(node.id, 0) < allowed:
+            return False
+        self.note(node.id, "limit_reached", max=allowed)
+        self.go(node.id, limit.otherwise)
+        return True
+
+    def switch(self, node: SwitchNode) -> None:
+        """Развилка: исход узла — значение поля у данных."""
+        value = read_ref(self.state, node.value)
+        if value is MISSING:
+            raise NodeFailed(f"развилка: по ссылке «{node.value}» нет данных")
+        chosen = value.get(node.field) if isinstance(value, dict) else None
+        if isinstance(chosen, bool):
+            outcome = "true" if chosen else "false"
+        elif isinstance(chosen, str | int):
+            outcome = str(chosen)
+        else:
+            raise NodeFailed(
+                f"развилка: у данных «{node.value}» нет значения в поле «{node.field}»"
+            )
+        self.finish(node.id, {}, outcome)
+
+    def enter_for_each(self, node: ForEachNode) -> None:
+        """«Для каждого»: начать с первого элемента; пустой список — исход `empty`."""
+        items = self._items(node)
+        if node.collect is not None:
+            # Собранное начинается заново: в цикле узел может выполняться не в первый раз.
+            self.state.write(node.id, {"results": []})
+        if items:
+            self._start_item(node, items, 0)
+        else:
+            self.finish(node.id, {}, "empty")
+
+    def _items(self, node: ForEachNode) -> list[Any]:
+        items = read_ref(self.state, node.over)
+        if not isinstance(items, list):
+            raise NodeFailed(f"«для каждого»: по ссылке «{node.over}» нет списка")
+        return items
+
+    def _start_item(self, node: ForEachNode, items: list[Any], index: int) -> None:
+        # Тело очищается перед каждым элементом: иначе собрать можно было бы чужое значение.
+        forget(self.state, body_ids(node))
+        self.state.item_index[node.id] = index
+        self.state.write(node.id, {"item": items[index]})
+        self.state.current = [node.body.start]
+        self.note(node.id, "item_started", index=index)
+
+    def _end_item(self, node_id: str) -> None:
+        """Ветка элемента закончилась: собрать `collect` и взять следующий элемент."""
+        node, state = self.places[node_id].node, self.state
+        index = state.item_index.get(node_id)
+        if index is None:
+            raise NodeFailed(f"«для каждого» «{node_id}»: в состоянии нет номера элемента")
+        self._collect(node, index)
+        items = self._items(node)
+        if index + 1 < len(items):
+            self._start_item(node, items, index + 1)
+            return
+        # Список пройден. `item` и значения тела видны только внутри — снаружи их нет.
+        forget(state, body_ids(node))
+        forget_output(state, node_id, "item")
+        del state.item_index[node_id]
+        self.finish(node_id, {}, "ok")
+
+    def _collect(self, node: ForEachNode, index: int) -> None:
+        if node.collect is None:
+            return
+        if isinstance(node.collect, str):
+            value = read_ref(self.state, node.collect)
+            missing = [node.collect] if value is MISSING else []
+        else:
+            value = {name: read_binding(self.state, bound) for name, bound in node.collect.items()}
+            missing = [name for name, found in value.items() if found is MISSING]
+        if missing:
+            # Ветка элемента не дошла до узла, с которого собирают: элемент пропускается.
+            self.note(node.id, "item_skipped", index=index, missing=missing)
+            return
+        results = self.state.ports[node.id].get("results", [])
+        self.state.write(node.id, {"results": [*results, value]})
+        self.note(node.id, "item_collected", index=index)
 
 
 class Engine:
@@ -111,47 +298,71 @@ class Engine:
         state = await self._store.load(run_id)
         if state is None:
             raise LookupError(f"запуск «{run_id}» не найден")
-        # Законченный запуск продолжать некуда. Запуск на паузе продолжается ответом
-        # человека, а это задача 05.
+        # Законченный запуск продолжать некуда, а запуск на паузе продолжает `respond`.
         if state.status in (RunStatus.DONE, RunStatus.WAITING):
             return state
-        state.status, state.error = RunStatus.RUNNING, None
+        state.error = None
+        if state.waiting:
+            # Блок упал уже после ответа человека. Экран остаётся прежним: человек отвечает
+            # ещё раз, а блок не вызывается заново без него.
+            state.status = RunStatus.WAITING
+            await self._store.save(state)
+            return state
+        state.status = RunStatus.RUNNING
         return await self._advance(pipeline, state)
 
-    async def _advance(self, pipeline: Pipeline, state: RunState) -> RunState:
-        nodes = {node.id: node for node in pipeline.nodes}
-        while state.current:
+    async def respond(
+        self, pipeline: Pipeline, run_id: str, node_id: str, response: Mapping[str, Any]
+    ) -> RunState:
+        """Передаёт ответ человека узлу, на котором запуск стоит на паузе, и идёт дальше.
+
+        Блок вызывается второй раз с теми же входами; в `context.shown` — данные экрана,
+        которые он сам просил показать, в `context.human_response` — ответ.
+        """
+        state = await self._store.load(run_id)
+        if state is None:
+            raise LookupError(f"запуск «{run_id}» не найден")
+        waiting = next((item for item in state.waiting if item.node_id == node_id), None)
+        if state.status is not RunStatus.WAITING or waiting is None:
+            raise ResponseRejected(f"запуск «{run_id}» не ждёт ответа на узле «{node_id}»")
+        problems = response_problems(waiting.screen, dict(response))
+        if problems:
+            raise ResponseRejected(
+                f"ответ не подходит экрану «{waiting.screen.value}»: " + "; ".join(problems)
+            )
+        state.status = RunStatus.RUNNING
+        return await self._advance(pipeline, state, copy.deepcopy(dict(response)))
+
+    async def _advance(
+        self, pipeline: Pipeline, state: RunState, response: dict[str, Any] | None = None
+    ) -> RunState:
+        """Выполняет узлы, пока запуск не закончится, не встанет на паузу или не упадёт.
+
+        `response` — ответ человека для первого из узлов: с него запуск снимается с паузы.
+        """
+        places = _places(pipeline)
+        while state.status is RunStatus.RUNNING and state.current:
             node_id = state.current[0]
+            # Копия на случай отмены шага: с ней запуск остаётся на этом узле без следов
+            # незаконченного шага — выходов, счётчиков, собранных элементов.
+            before = state.model_copy(deep=True)
+            step = _Step(places, state)
             try:
-                outputs, outcome, block_events = await self._step(nodes.get(node_id), state)
+                await self._step(step, node_id, response)
             except NodeFailed as failure:
-                return await self._fail(state, node_id, str(failure))
-            before, order_before = state.ports.get(node_id), list(state.write_order)
-            state.write(node_id, outputs)
-            target = _next(pipeline.transitions, node_id, outcome)
-            state.current = [target] if target else []
-            own_events = [BlockEvent(type="node_done", data={"outcome": outcome})]
-            if not target:
-                # Подходящего перехода нет — ветка, а с ней и запуск, на этом заканчивается.
-                state.status = RunStatus.DONE
-                own_events.append(BlockEvent(type="run_done"))
+                return await self._fail(before, node_id, str(failure))
+            response = None
             try:
                 # Состояние сохраняется после каждого узла: при сбое теряется не больше шага.
                 await self._store.save(state)
             except Exception as error:
                 # Хранилище не приняло состояние — например, в выходе блока оказался символ,
-                # который база не записывает. Шаг отменяется: запуск остаётся на этом узле без
-                # его новых выходов. Текст ошибки хранилища в состояние не идёт: в нём могут
-                # быть данные запуска.
-                state.status, state.current = RunStatus.RUNNING, [node_id]
-                if before is None:
-                    del state.ports[node_id]
-                else:
-                    state.ports[node_id] = before
-                state.write_order = order_before
+                # который база не записывает. Шаг отменяется. Текст ошибки хранилища в
+                # состояние не идёт: в нём могут быть данные запуска.
                 reason = f"не удалось сохранить состояние после узла ({type(error).__name__})"
-                return await self._fail(state, node_id, reason)
-            await self._journal(state.run_id, node_id, block_events, own_events)
+                return await self._fail(before, node_id, reason)
+            for at, block_events, own_events in step.notes:
+                await self._journal(state.run_id, at, block_events, own_events)
         return state
 
     async def _fail(self, state: RunState, node_id: str, reason: str) -> RunState:
@@ -193,44 +404,82 @@ class Engine:
             )
             await self._store.append_events(run_id, node_id, [lost, *own])
 
-    async def _step(
-        self, node: Any, state: RunState
-    ) -> tuple[dict[str, Any], str, list[BlockEvent]]:
-        """Один шаг: выполняет узел. Возвращает его выходы, исход и события; состояние не меняет."""
-        if node is None:
+    async def _step(self, step: _Step, node_id: str, response: dict[str, Any] | None) -> None:
+        """Один шаг: выполняет узел и меняет состояние в `step`. В хранилище не пишет."""
+        place = step.places.get(node_id)
+        if place is None:
             raise NodeFailed("такого узла нет в пайплайне")
-        if isinstance(node, SwitchNode):
-            raise NodeFailed(NOT_YET.format("выполнять развилку"))
-        if isinstance(node, ForEachNode):
-            raise NodeFailed(NOT_YET.format("выполнять «для каждого»"))
-        if not isinstance(node, BlockNode):
+        node = place.node
+        if isinstance(node, TriggerNode):
             raise NodeFailed("узел-триггер не выполняется: с него запуск только начинается")
-        if node.limit is not None:
-            raise NodeFailed(NOT_YET.format("считать ограничитель"))
+        if step.limit_reached(node):
+            return
+        if isinstance(node, SwitchNode):
+            step.switch(node)
+        elif isinstance(node, ForEachNode):
+            step.enter_for_each(node)
+        else:
+            await self._run_block(step, node, response)
+
+    async def _run_block(
+        self, step: _Step, node: BlockNode, response: dict[str, Any] | None
+    ) -> None:
+        state = step.state
         block = self._blocks.get(node.block)
         if block is None:
             raise NodeFailed(f"блок «{node.block}» не найден")
+        result = await self._call(node, block, state, response)
+        checked = _checked(block.manifest, result)
+        if response is not None:
+            step.note(node.id, "node_resumed")
+        if isinstance(result, Waiting):
+            who = "teacher" if block.manifest.kind is Kind.APPROVAL else "student"
+            state.status = RunStatus.WAITING
+            state.waiting = [
+                WaitingFor(node_id=node.id, who=who, screen=result.screen, data=checked["data"])
+            ]
+            asked = BlockEvent(
+                type="node_waiting", data={"screen": result.screen.value, "who": who}
+            )
+            step.notes.append((node.id, result.events, [asked]))
+            return
+        state.waiting = []
+        step.finish(node.id, checked["outputs"], result.outcome, result.events)
 
+    async def _call(
+        self, node: BlockNode, block: LoadedBlock, state: RunState, response: dict[str, Any] | None
+    ) -> Any:
+        """Вызывает блок. Упавший автоматический блок вызывается снова — до `MAX_RETRIES` раз."""
         inputs = _inputs(node, block.manifest, state)
-        config = _with_params(node.config, state.params)
-        context = RunContext(
-            run_id=state.run_id,
-            node_id=node.id,
-            pipeline_id=state.pipeline_id,
-            params=state.params,
-            student_id=state.student_id,
-            teacher_id=state.teacher_id,
-            llm=self._llm,
-        )
-        try:
-            result = await block.run(inputs, config, context)
-        except Exception as error:
-            raise NodeFailed(
-                f"блок «{node.block}» упал: {type(error).__name__}: {error}"
-            ) from error
-
-        outputs = _checked_outputs(block.manifest, result)
-        return outputs, result.outcome, result.events
+        config = with_params(node.config, state.params)
+        # Блок, который ждёт человека, не повторяется: после ответа повтор задал бы ему
+        # тот же вопрос без самого человека.
+        retries = MAX_RETRIES if block.manifest.kind is Kind.AUTO else 0
+        for attempt in range(1, retries + 2):
+            context = RunContext(
+                run_id=state.run_id,
+                node_id=node.id,
+                pipeline_id=state.pipeline_id,
+                params=state.params,
+                student_id=state.student_id,
+                teacher_id=state.teacher_id,
+                attempt=attempt,
+                shown=state.waiting[0].data if response is not None else None,
+                human_response=response,
+                llm=self._llm,
+            )
+            try:
+                # Каждая попытка получает свои копии: блок мог успеть поправить входы на месте.
+                return await block.run(copy.deepcopy(inputs), copy.deepcopy(config), context)
+            except Exception as error:
+                reason = f"блок «{node.block}» упал: {type(error).__name__}: {error}"
+                if attempt > retries:
+                    raise NodeFailed(reason) from error
+                failed = BlockEvent(
+                    type="attempt_failed", data={"attempt": attempt, "error": _storable(reason)}
+                )
+                await self._journal(state.run_id, node.id, [], [failed])
+        raise AssertionError("цикл попыток всегда заканчивается результатом или ошибкой")
 
 
 def _storable(text: str) -> str:
@@ -261,62 +510,39 @@ def _next(transitions: list[Transition], node_id: str, outcome: str | None) -> s
     return moves.get(outcome, moves.get(None))
 
 
-def _with_params(value: Any, params: Mapping[str, Any]) -> Any:
-    """Настройки узла, в которых ссылки `{"$param": "имя"}` заменены значениями."""
-    if isinstance(value, dict):
-        if set(value) == {"$param"}:
-            return params[value["$param"]]
-        return {key: _with_params(item, params) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_with_params(item, params) for item in value]
-    return value
-
-
 def _inputs(node: BlockNode, manifest: Manifest, state: RunState) -> dict[str, Any]:
     """Значения входов узла: по каждой привязке — последнее значение указанного выхода."""
     values = {}
     for name, bound in node.inputs.items():
-        source, port = _single_ref(bound)
-        written = state.ports.get(source, {})
-        if port in written:
-            # Блок получает копию: правка входа на месте не меняет чужой выход в состоянии.
-            values[name] = copy.deepcopy(written[port])
+        value = read_binding(state, bound)
+        if value is not MISSING:
+            values[name] = value
     missing = [port.name for port in manifest.inputs if port.required and port.name not in values]
     if missing:
         raise NodeFailed(f"обязательный вход остался без данных: {', '.join(missing)}")
     return values
 
 
-def _single_ref(bound: Binding) -> tuple[str, str]:
-    refs = bound if isinstance(bound, list) else [bound]
-    if len(refs) > 1:
-        raise NodeFailed(NOT_YET.format("выбирать из нескольких ссылок последнюю записанную"))
-    source, port, *field = refs[0].split(".")
-    if field:
-        raise NodeFailed(NOT_YET.format("читать поле записи"))
-    return source, port
-
-
-def _checked_outputs(manifest: Manifest, result: Any) -> dict[str, Any]:
-    """Выходы блока в виде JSON — после проверки, что результат не расходится с манифестом."""
+def _checked(manifest: Manifest, result: Any) -> dict[str, Any]:
+    """Результат блока в виде JSON — после проверки, что он не расходится с манифестом."""
     if not isinstance(result, Done | Waiting):
         raise NodeFailed(
             f"блок «{manifest.id}» вернул не результат `run()`, а {type(result).__name__}"
         )
     problems = result_problems(manifest, result)
-    if not problems and isinstance(result, Waiting):
-        problems = [NOT_YET.format("ставить запуск на паузу")]
     if problems:
         raise NodeFailed(f"блок «{manifest.id}»: " + "; ".join(problems))
     try:
         # В состоянии лежит только то, что можно записать в JSON (ADR 0007): так значение
         # одинаково выглядит до сохранения в базу и после чтения из неё.
-        outputs = result.model_dump(mode="json")["outputs"]
+        checked = result.model_dump(mode="json")
     except Exception as error:
         raise NodeFailed(
             f"блок «{manifest.id}»: результат нельзя записать в JSON: {error}"
         ) from error
-    for name, value in outputs.items():
+    if isinstance(result, Waiting):
+        return checked
+    for name, value in checked["outputs"].items():
         port = manifest.output(name)
         try:
             found = value_problems(port, value, port.json_schema)
@@ -326,4 +552,4 @@ def _checked_outputs(manifest: Manifest, result: Any) -> dict[str, Any]:
         problems += [f"выход «{name}»: {text}" for text in found]
     if problems:
         raise NodeFailed(f"блок «{manifest.id}»: " + "; ".join(problems))
-    return outputs
+    return checked

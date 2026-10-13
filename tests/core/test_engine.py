@@ -1,6 +1,8 @@
-"""Движок v1 на фейковых блоках: без базы и без ИИ-модели.
+"""Движок на фейковых блоках: прямая цепочка, сохранение состояния, ошибки.
 
-Хранилище здесь — словарь в памяти. То же самое с настоящей базой — в `test_engine_db.py`.
+Без базы и без ИИ-модели: хранилище здесь — словарь в памяти. То же самое с настоящей
+базой — в `test_engine_db.py`. Развилка, ограничитель, пауза, «для каждого» и повтор блока —
+в соседних файлах `test_engine_*.py`.
 """
 
 import asyncio
@@ -10,8 +12,7 @@ import pytest
 
 from backend.core.contracts.pipeline import parse_pipeline
 from backend.core.contracts.ports import Event, TriggerType
-from backend.core.contracts.run import BlockEvent, Done, Waiting
-from backend.core.contracts.screens import ScreenType
+from backend.core.contracts.run import BlockEvent, Done
 from backend.core.contracts.state import RunState, RunStatus, RunStore
 from backend.core.contracts.wiring import check_wiring
 from backend.core.engine import Engine, LoadedBlock
@@ -113,7 +114,7 @@ def test_block_gets_run_details_in_context(store, blocks, pipeline, calls):
     assert context.attempt == 1
     assert context.shown is None and context.human_response is None
     assert context.llm is model
-    # MCP-инструменты в движке v1 блоку не выдаются.
+    # MCP-инструменты движок блоку пока не выдаёт (задачи 23 и 29).
     assert context.tools is None
 
 
@@ -529,58 +530,3 @@ def test_unknown_block_stops_the_run(store, blocks, pipeline_data):
 
     assert state.status is RunStatus.ERROR
     assert state.error == "узел «upper»: блок «transform.missing» не найден"
-
-
-# --- То, что появится в задаче 05 ---------------------------------------------------------
-
-INNER = {"id": "inner", "type": "block", "block": "transform.fake_upper"}
-
-
-@pytest.mark.parametrize(
-    ("change", "what"),
-    [
-        ({"type": "switch", "value": "make.text", "field": "text"}, "выполнять развилку"),
-        (
-            {"type": "for_each", "over": "make.text", "body": {"start": "inner", "nodes": [INNER]}},
-            "выполнять «для каждого»",
-        ),
-        ({"limit": {"max": 2}}, "считать ограничитель"),
-        ({"inputs": {"text": ["make.text", "start.event"]}}, "выбирать из нескольких ссылок"),
-        ({"inputs": {"text": "make.text.text"}}, "читать поле записи"),
-    ],
-    ids=["switch", "for_each", "limit", "several_refs", "record_field"],
-)
-def test_constructs_of_task_05_stop_the_run_with_an_explanation(
-    store, blocks, pipeline_data, calls, change, what
-):
-    node = {**pipeline_data["nodes"][2], **change}
-    if node["type"] != "block":
-        node = {"id": "upper", **change}
-    pipeline_data["nodes"][2] = node
-
-    state = start(Engine(store, blocks), parse_pipeline(pipeline_data))
-
-    assert state.status is RunStatus.ERROR
-    assert state.error.startswith(f"узел «upper»: движок пока не умеет {what}")
-    assert state.error.endswith("это появится в задаче 05")
-    assert nodes_called(calls) == ["make"]
-
-
-def test_block_that_waits_for_a_person_stops_the_run_with_an_explanation(
-    store, blocks, manifest_for, pipeline_data
-):
-    async def ask(inputs, config, context):
-        return Waiting(
-            screen=ScreenType.ANSWER_FORM,
-            data={"task_id": "t1", "statement": "Вычислите $2^3$.", "forms": ["text"]},
-        )
-
-    manifest = manifest_for("student.fake_ask", kind="interactive", screen="answer_form")
-    blocks = {**blocks, "student.fake_ask": LoadedBlock(manifest, ask)}
-    pipeline_data["nodes"][2] = {"id": "upper", "type": "block", "block": "student.fake_ask"}
-
-    state = start(Engine(store, blocks), parse_pipeline(pipeline_data))
-
-    assert state.status is RunStatus.ERROR
-    assert "движок пока не умеет ставить запуск на паузу" in state.error
-    assert state.waiting == []

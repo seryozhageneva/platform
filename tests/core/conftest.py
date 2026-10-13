@@ -1,18 +1,26 @@
-"""Общее для тестов движка: три фейковых блока, пайплайн из них и хранилище «в памяти».
+"""Общее для тестов движка: фейковые блоки, пайплайны из них и хранилище «в памяти».
 
 Фейковый блок — простая подделка настоящего блока с тем же контрактом: манифест и функция
 `run`. Настоящих блоков, базы и ИИ-модели здесь нет (ADR 0006).
 """
 
+import asyncio
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from backend.core.contracts.manifest import Manifest, parse_manifest
 from backend.core.contracts.pipeline import Pipeline, parse_pipeline
-from backend.core.contracts.run import BlockEvent, Done, RunContext
+from backend.core.contracts.ports import Event, TriggerType
+from backend.core.contracts.run import BlockEvent, Done, RunContext, Waiting
+from backend.core.contracts.screens import ScreenType
 from backend.core.contracts.state import RunState
-from backend.core.engine import LoadedBlock
+from backend.core.engine import Engine, LoadedBlock
+
+RUN = {"run_id": "run-1", "pipeline_id": "pipeline-1", "pipeline_version": 1}
+EVENT = Event(trigger=TriggerType.MANUAL, occurred_at=datetime(2026, 10, 12, 9, 30, tzinfo=UTC))
 
 TEXT_IN = {"name": "text", "title": "Текст", "type": "Text"}
 TEXT_OUT = {"name": "text", "title": "Текст", "type": "Text"}
@@ -186,3 +194,181 @@ def pipeline_data() -> dict[str, Any]:
 @pytest.fixture
 def pipeline(pipeline_data) -> Pipeline:
     return parse_pipeline(pipeline_data)
+
+
+# --- Для тестов конструкций движка v2 ------------------------------------------------------
+
+
+class Runner:
+    """Запускает движок в тесте. На каждое действие — новый экземпляр движка.
+
+    Так каждый тест заодно проверяет, что движок ничего не держит в памяти: всё, что нужно
+    для продолжения запуска, лежит в хранилище.
+    """
+
+    def __init__(self, store: MemoryRunStore, blocks: Mapping[str, LoadedBlock]) -> None:
+        self.store = store
+        self.blocks = blocks
+
+    def start(self, pipeline: Pipeline, **more: Any) -> RunState:
+        engine = Engine(self.store, self.blocks)
+        return asyncio.run(engine.start(pipeline, **{**RUN, "event": EVENT, **more}))
+
+    def resume(self, pipeline: Pipeline, run_id: str = "run-1") -> RunState:
+        return asyncio.run(Engine(self.store, self.blocks).resume(pipeline, run_id))
+
+    def respond(
+        self, pipeline: Pipeline, node_id: str, response: dict[str, Any], run_id: str = "run-1"
+    ) -> RunState:
+        engine = Engine(self.store, self.blocks)
+        return asyncio.run(engine.respond(pipeline, run_id, node_id, response))
+
+    def interrupted(self, **fields: Any) -> RunState:
+        """Кладёт в хранилище запуск, прерванный посреди работы, — как после сбоя сервера."""
+        state = RunState(**{**RUN, **fields})
+        asyncio.run(self.store.save(state))
+        return state
+
+    def journal(self, *kinds: str) -> list[tuple[str, str, dict[str, Any]]]:
+        """Записи журнала указанных видов, по порядку."""
+        return [entry for entry in self.store.journal if entry[1] in kinds]
+
+
+@pytest.fixture
+def go(store, blocks) -> Runner:
+    return Runner(store, blocks)
+
+
+@pytest.fixture
+def add_block(blocks, calls):
+    """Добавляет фейковый блок в таблицу блоков. Каждый его вызов попадает в `calls`."""
+
+    def add(block_id: str, run, **manifest_fields: Any) -> None:
+        async def recorded(inputs, config, context):
+            calls.append((context.node_id, inputs, config, context))
+            return await run(inputs, config, context)
+
+        blocks[block_id] = LoadedBlock(fake_manifest(block_id, **manifest_fields), recorded)
+
+    return add
+
+
+@pytest.fixture
+def called(calls):
+    """Узлы, блоки которых вызывались, по порядку."""
+    return lambda: [node for node, *_ in calls]
+
+
+@pytest.fixture
+def graph():
+    """Собирает пайплайн: триггер `start`, переход от него к первому узлу и всё переданное.
+
+    Переход записывается коротко: `("откуда", "исход", "куда")`; исход None — «при любом».
+    """
+
+    def build(nodes: list[dict], transitions: list[tuple] = (), params: list[dict] = ()):
+        moves = [
+            {"from": source, "to": target} | ({"when": when} if when else {})
+            for source, when, target in transitions
+        ]
+        return parse_pipeline(
+            {
+                "id": "test_graph",
+                "name": "Пайплайн для теста",
+                "params": list(params),
+                "nodes": [
+                    {"id": "start", "type": "trigger", "launches": [{"type": "manual"}]},
+                    *nodes,
+                ],
+                "transitions": [{"from": "start", "to": nodes[0]["id"]}, *moves],
+            }
+        )
+
+    return build
+
+
+def body(start: str, nodes: list[dict], transitions: list[tuple] = ()) -> dict[str, Any]:
+    """Тело «для каждого» в формате пайплайна; переходы — как в `graph`."""
+    return {
+        "start": start,
+        "nodes": nodes,
+        "transitions": [
+            {"from": source, "to": target} | ({"when": when} if when else {})
+            for source, when, target in transitions
+        ],
+    }
+
+
+@pytest.fixture
+def for_each_body():
+    return body
+
+
+ANSWER_OUT = {"name": "answer", "title": "Ответ", "type": "Answer"}
+QUESTION = {"task_id": "t1", "statement": "Вычислите $2^3$.", "forms": ["text"]}
+
+
+def answer(text: str) -> dict[str, Any]:
+    """Ответ ученика с экрана «форма ответа»."""
+    return {"action": "answer", "answer": {"task_id": "t1", "form": "text", "text": text}}
+
+
+@pytest.fixture
+def answer_with():
+    return answer
+
+
+@pytest.fixture
+def ask(add_block):
+    """Блок `student.fake_ask`: показывает ученику вопрос и ждёт ответа.
+
+    Первый вызов — «жду человека». Второй, с ответом, — «готово»: ответ уходит на выход,
+    исход — `answer` или `hint_requested`.
+    """
+
+    async def run(inputs, config, context):
+        if context.human_response is None:
+            return Waiting(screen=ScreenType.ANSWER_FORM, data=QUESTION)
+        if context.human_response["action"] == "hint":
+            return Done(outcome="hint_requested")
+        return Done(outputs={"answer": context.human_response["answer"]}, outcome="answer")
+
+    add_block(
+        "student.fake_ask",
+        run,
+        kind="interactive",
+        screen="answer_form",
+        inputs=[{**TEXT_IN, "required": False}],
+        outputs=[ANSWER_OUT],
+        outcomes=["answer", "hint_requested"],
+    )
+
+
+FILES_OUT = {"name": "files", "title": "Файлы", "type": "File", "list": True}
+
+
+def file_ref(name: str) -> dict[str, Any]:
+    """Ссылка на файл работы: код, если имя кончается на `.py`, иначе документ."""
+    kind = "code" if name.endswith(".py") else "document"
+    return {"id": name, "name": name, "kind": kind, "media_type": "text/plain"}
+
+
+@pytest.fixture
+def file_of():
+    return file_ref
+
+
+@pytest.fixture
+def files(add_block):
+    """Блок `source.fake_files`: список файлов с именами из настройки `names`."""
+
+    async def run(inputs, config, context):
+        return Done(outputs={"files": [file_ref(name) for name in config["names"]]})
+
+    add_block("source.fake_files", run, outputs=[FILES_OUT])
+
+    def node(*names: str) -> dict[str, Any]:
+        config = {"names": list(names)}
+        return {"id": "get", "type": "block", "block": "source.fake_files", "config": config}
+
+    return node
