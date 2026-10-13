@@ -5,7 +5,7 @@
 ## Документы
 
 - `docs/vision.md` — что строим и почему; в конце раздел принятых решений и допущений.
-- `docs/roadmap.md` — 35 задач с критериями «готово, когда».
+- `docs/roadmap.md` — 36 задач с критериями «готово, когда».
 - `docs/glossary.md` — словарь терминов.
 - `docs/open-questions.md` — нерешённые вопросы; загляни сюда перед планом задачи.
 - `docs/contract.md` — контракт блока и формат пайплайна; примеры — в `docs/examples/`, схемы — в `docs/schemas/`.
@@ -50,6 +50,8 @@ uv run ruff check .              линтер
 uv run lint-imports              правила импортов из .importlinter (ADR 0003, 0006)
 uv run python -m backend.core.contracts.schema_export    обновить docs/schemas/ после правки контракта
 uv run python -m experiments.llm_check    ручной вызов настоящей модели: идёт в сеть, нужны ключ и сертификат в .env (ADR 0012)
+uv run python -m backend.api     сервер API на http://127.0.0.1:8000, описание — на странице /docs; нужны база и LLM_PROVIDER в .env (ADR 0013)
+uv run python -m experiments.api_check    ручная проверка API на поднятом сервере: пишет в рабочую базу выдуманного преподавателя
 ```
 
 CI (`.github/workflows/ci.yml`) запускает то же самое на каждый pull request. Тесты и линтер фронтенда появятся в задаче 13.
