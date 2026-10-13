@@ -3,7 +3,7 @@
 import copy
 
 import pytest
-from conftest import SCENARIOS, scenario
+from contract_examples import SCENARIOS, scenario
 
 from backend.core.contracts.base import ContractError
 from backend.core.contracts.pipeline import (

@@ -4,7 +4,7 @@ import json
 
 import pytest
 import yaml
-from conftest import MANIFESTS, ROOT, SCENARIOS, scenario
+from contract_examples import MANIFESTS, ROOT, SCENARIOS, scenario
 from jsonschema import Draft202012Validator
 
 from backend.core.contracts.schema_export import SCHEMAS, render

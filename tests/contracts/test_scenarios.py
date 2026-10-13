@@ -5,7 +5,7 @@
 """
 
 import pytest
-from conftest import SCENARIOS, scenario
+from contract_examples import SCENARIOS, scenario
 
 from backend.core.contracts.manifest import Category
 from backend.core.contracts.pipeline import BlockNode, parse_pipeline
