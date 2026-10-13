@@ -1,11 +1,11 @@
 """Таблицы базы данных (ADR 0007).
 
-Девять таблиц: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
-запуски и журнал событий. Остальные сущности из docs/vision.md добавляются миграциями в
-задачах, где они впервые нужны. После правки этого файла нужна новая миграция:
-тест `tests/models/test_migrations.py` падает, если забыли таблицу, столбец или индекс.
-Изменение допустимых значений (`CHECK`) он не видит — их проверяют тесты, которые сохраняют
-каждое значение перечисления.
+Десять таблиц: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
+запуски, журнал событий и журнал вызовов модели (ADR 0012). Остальные сущности из
+docs/vision.md добавляются миграциями в задачах, где они впервые нужны. После правки этого
+файла нужна новая миграция: тест `tests/models/test_migrations.py` падает, если забыли
+таблицу, столбец или индекс. Изменение допустимых значений (`CHECK`) он не видит — их
+проверяют тесты, которые сохраняют каждое значение перечисления.
 """
 
 import uuid
@@ -250,4 +250,30 @@ class EventRow(Base):
     node_id: Mapped[str]
     type: Mapped[str]
     data: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default=EMPTY_JSON)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class LLMCallRow(Base):
+    """Запись журнала вызовов модели (ADR 0012): только цифры, без текста запроса и ответа.
+
+    Запуск и узел пусты у вызова вне запуска — например, у ручной проверки модели.
+    `error` — короткое обозначение причины неудачи; у удачного вызова пусто.
+    """
+
+    __tablename__ = "llm_calls"
+    __table_args__ = (
+        CheckConstraint("input_tokens >= 0 AND output_tokens >= 0", name="tokens_not_negative"),
+        CheckConstraint("latency_ms >= 0", name="latency_not_negative"),
+        Index("ix_llm_calls_run", "run_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    node_id: Mapped[str | None]
+    provider: Mapped[str]
+    model: Mapped[str]
+    input_tokens: Mapped[int]
+    output_tokens: Mapped[int]
+    latency_ms: Mapped[int]
+    error: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

@@ -49,6 +49,7 @@ uv run ruff format --check .     проверка оформления кода
 uv run ruff check .              линтер
 uv run lint-imports              правила импортов из .importlinter (ADR 0003, 0006)
 uv run python -m backend.core.contracts.schema_export    обновить docs/schemas/ после правки контракта
+uv run python -m experiments.llm_check    ручной вызов настоящей модели: идёт в сеть, нужны ключ и сертификат в .env (ADR 0012)
 ```
 
 CI (`.github/workflows/ci.yml`) запускает то же самое на каждый pull request. Тесты и линтер фронтенда появятся в задаче 13.
