@@ -8,19 +8,13 @@ import asyncio
 import copy
 import uuid
 
-from api_fakes import THREE_FAKES, chain, saved
+from api_fakes import THREE_FAKES, chain, launch, saved
 from sqlalchemy import func, select
 
 from backend.models.llm_calls import LLMCallRepository
 from backend.models.tables import RunRow
 
 API = "/api/v1"
-
-
-def launch(client, headers, pipeline_id, **params):
-    return client.post(
-        f"{API}/pipelines/{pipeline_id}/runs", json={"params": params}, headers=headers
-    )
 
 
 def journal(client, headers, run_id) -> list[tuple[str, str]]:

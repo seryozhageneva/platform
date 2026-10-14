@@ -1,4 +1,4 @@
-# Черновик: описание блока без кода. Когда блок будет написан, манифест переедет в его пакет.
+# Копия манифеста из blocks/source/task_bank/block.yaml: блок написан (задача 09).
 id: source.task_bank
 version: 0.1.0
 name: "Источник: банк задач"
@@ -17,6 +17,7 @@ config:
   type: object
   properties:
     topic: {title: Тема, type: string}
+    subject: {title: Предмет, type: string}
     task_id: {title: Конкретная задача, type: string}
     difficulty: {title: Стартовая сложность, type: integer, minimum: 1, default: 1}
     adapt: {title: Подстраивать сложность, type: boolean, default: true}
