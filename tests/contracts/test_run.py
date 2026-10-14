@@ -19,6 +19,7 @@ from backend.core.contracts.run import (
     result_problems,
 )
 from backend.core.contracts.screens import ScreenType
+from backend.core.contracts.testing import FakeStore
 
 TASK = {
     "id": "t1",
@@ -189,7 +190,16 @@ def test_block_does_not_repeat_expensive_work_after_the_pause():
 
 
 def test_services_are_not_sent_over_the_network():
-    request = RunRequest(inputs={"task": TASK}, context=context(llm=FakeLLM(), student_id="s1"))
+    request = RunRequest(
+        inputs={"task": TASK},
+        context=context(llm=FakeLLM(), store=FakeStore(), student_id="s1"),
+    )
     body = request.model_dump(mode="json")
-    assert "llm" not in body["context"] and "tools" not in body["context"]
+    assert not {"llm", "tools", "store"} & body["context"].keys()
     assert body["context"]["student_id"] == "s1"
+
+
+def test_block_without_services_gets_empty_fields():
+    """Старые блоки и тесты, которым хранилище не нужно, ничего не замечают."""
+    plain = context()
+    assert plain.llm is None and plain.tools is None and plain.store is None

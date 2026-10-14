@@ -1,14 +1,15 @@
-"""Интерфейсы служб, которые блок получает через `context` (ADR 0006).
+"""Интерфейсы служб, которые блок получает через `context` (ADR 0006, ADR 0014).
 
-Здесь только «розетки»: что можно попросить у модели и у MCP-сервера. Настоящие реализации
-живут в `backend/llm/` и `backend/mcp_client/`, их подключает слой сборки. Блок о них не
-знает, поэтому в тестах вместо модели подставляется фейк с тем же интерфейсом.
+Здесь только «розетки»: что можно попросить у модели, у MCP-сервера и у хранилища платформы.
+Настоящие реализации живут в `backend/llm/`, `backend/mcp_client/` и `backend/models/`, их
+подключает слой сборки. Блок о них не знает, поэтому в тестах вместо них подставляются
+подделки с тем же интерфейсом.
 """
 
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from backend.core.contracts.base import Strict
-from backend.core.contracts.ports import FileRef
+from backend.core.contracts.ports import FileRef, Task
 
 
 class LLMMessage(Strict):
@@ -55,3 +56,26 @@ class ToolClient(Protocol):
     async def list_tools(self) -> list[ToolInfo]: ...
 
     async def call(self, server: str, tool: str, arguments: dict[str, Any]) -> Any: ...
+
+
+@runtime_checkable
+class PlatformStore(Protocol):
+    """Данные платформы, которые может читать встроенный блок (ADR 0014).
+
+    Хранилище уже ограничено преподавателем запуска: блок не называет преподавателя и чужих
+    данных не видит. Отдаются только подтверждённые задачи — черновик в урок не попадает.
+    """
+
+    async def find_tasks(
+        self,
+        *,
+        topic: str | None = None,
+        difficulty: int | None = None,
+        subject: str | None = None,
+    ) -> list[Task]:
+        """Задачи банка по условиям; незаданное не учитывается. Нет таких — пустой список."""
+        ...
+
+    async def get_task(self, task_id: str) -> Task | None:
+        """Одна задача банка по номеру; `None`, если такой нет."""
+        ...

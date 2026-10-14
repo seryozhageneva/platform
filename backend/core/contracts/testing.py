@@ -1,8 +1,9 @@
-"""Фейковая ИИ-модель для тестов (ADR 0006, ADR 0012).
+"""Подделки служб для тестов: ИИ-модель и хранилище платформы (ADR 0006, ADR 0012, ADR 0014).
 
-Блок не видит слой моделей `backend/llm/`, поэтому подделка лежит рядом с контрактом:
-подключить её может и тест ядра, и тест любого блока. Она ничего не отправляет в сеть —
-отвечает тем, что заранее написал автор теста, и запоминает, о чём её спросили.
+Блок не видит ни слой моделей `backend/llm/`, ни базу, поэтому подделки лежат рядом с
+контрактом: подключить их может и тест ядра, и тест любого блока. Фейковая модель ничего не
+отправляет в сеть — отвечает тем, что заранее написал автор теста, и запоминает, о чём её
+спросили. Подделка хранилища держит задачи в памяти.
 
 Это вспомогательный файл: моделей контракта он не меняет.
 """
@@ -19,6 +20,7 @@ from referencing import Registry
 from referencing.exceptions import Unresolvable
 
 from backend.core.contracts.interfaces import LLMMessage, LLMResponse
+from backend.core.contracts.ports import Task
 
 # Ответ, заданный в тесте: текст, данные для ответа по схеме или ошибка, с которой модель «упадёт».
 FakeReply = str | dict[str, Any] | list[Any] | Exception
@@ -115,3 +117,33 @@ def _by_schema(reply: str | dict[str, Any] | list[Any], schema: dict[str, Any]) 
             "ответ фейковой модели не подходит под схему: " + "; ".join(sorted(problems))
         )
     return data
+
+
+class FakeStore:
+    """Подделка с интерфейсом `PlatformStore`: банк задач одного преподавателя в памяти.
+
+    Тест кладёт сюда задачи, которые в платформе были бы подтверждёнными задачами
+    преподавателя этого запуска. Ищет так же, как настоящее хранилище: по совпадению условий,
+    в том порядке, в каком задачи переданы.
+    """
+
+    def __init__(self, tasks: Iterable[Task] = ()) -> None:
+        self.tasks = list(tasks)
+
+    async def find_tasks(
+        self,
+        *,
+        topic: str | None = None,
+        difficulty: int | None = None,
+        subject: str | None = None,
+    ) -> list[Task]:
+        return [
+            task
+            for task in self.tasks
+            if (topic is None or task.topic == topic)
+            and (difficulty is None or task.difficulty == difficulty)
+            and (subject is None or task.subject == subject)
+        ]
+
+    async def get_task(self, task_id: str) -> Task | None:
+        return next((task for task in self.tasks if task.id == task_id), None)
