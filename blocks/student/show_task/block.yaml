@@ -1,0 +1,53 @@
+# Блок «Показать задачу и принять ответ». Копия этого манифеста лежит в docs/examples/manifests/:
+# по ней тесты контракта проверяют стыковку сценариев. Тест следит, чтобы копии совпадали.
+id: student.show_task
+version: 0.1.0
+name: Показать задачу и принять ответ
+description: >-
+  Показывает ученику условие задачи и, если она есть, подсказку. Ждёт, пока ученик
+  ответит или попросит подсказку. Свободного чата нет.
+author: platform
+category: student
+
+# Блок ждёт ученика и показывает ему готовый экран платформы «форма ответа».
+kind: interactive
+screen: answer_form
+
+inputs:
+  - name: task
+    title: Задача
+    type: Task
+  # Необязательный вход: при первом показе задачи подсказки ещё нет.
+  - name: hint
+    title: Подсказка
+    type: Hint
+    required: false
+
+outputs:
+  - name: answer
+    title: Ответ ученика
+    type: Answer
+
+# Настройки — JSON Schema; по ней редактор строит форму.
+config:
+  type: object
+  properties:
+    forms:
+      title: В каком виде можно отвечать
+      type: array
+      items:
+        enum: [text, formula, code, photo]
+      default: [text, formula]
+    allow_hints:
+      title: Разрешить просить подсказку
+      type: boolean
+      default: true
+
+# Исходы: по ним пайплайн выбирает, что выполнять дальше.
+outcomes: [answer, photo, hint_requested]
+
+runtime:
+  type: python
+  entrypoint: blocks.student.show_task:run
+
+side_effects: false

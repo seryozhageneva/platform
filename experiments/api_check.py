@@ -1,4 +1,5 @@
-"""Ручная проверка API: пайплайн и журнал (задача 08), банк задач (задача 09).
+"""Ручная проверка API: пайплайн и журнал (задача 08), банк задач (задача 09), ответ на
+паузе (задача 10).
 
 Сначала в одном терминале поднимается сервер:  uv run python -m backend.api
 Потом в другом запускается проверка:           uv run python -m experiments.api_check
@@ -6,7 +7,9 @@
 Это не тест: скрипт пишет в рабочую базу выдуманного преподавателя (почта на `example.test`),
 его выдуманные задачи, пайплайны и запуски. Первый пайплайн — триггер и развилка «каким
 способом запущен»; второй — триггер и блок «Источник: банк задач», который берёт задачу
-нужной темы и сложности. Модель не вызывается.
+нужной темы и сложности; третий — урок из двух задач: «взять задачу» и «показать задачу и
+принять ответ». Скрипт отвечает за ученика выдуманными ответами, и запуск после каждого
+ответа идёт дальше. Ответы записываются в работы учеников. Модель не вызывается.
 """
 
 import asyncio
@@ -70,6 +73,37 @@ BANK_PIPELINE: dict[str, Any] = {
     "transitions": [{"from": "start", "to": "take_task"}],
 }
 
+LESSON_PIPELINE: dict[str, Any] = {
+    "format": 1,
+    "id": "api_check_lesson",
+    "name": "Проверка ответа на паузе",
+    "params": [{"name": "topic", "title": "Тема", "type": "string"}],
+    "nodes": [
+        {"id": "start", "type": "trigger", "launches": [{"type": "manual"}]},
+        {
+            "id": "take_task",
+            "type": "block",
+            "block": "source.task_bank",
+            "title": "Взять задачу",
+            "config": {"topic": {"$param": "topic"}, "difficulty": 1},
+            "inputs": {"previous": "take_task.task"},
+            "limit": {"max": 2},
+        },
+        {
+            "id": "show",
+            "type": "block",
+            "block": "student.show_task",
+            "title": "Показать задачу и принять ответ",
+            "inputs": {"task": "take_task.task"},
+        },
+    ],
+    "transitions": [
+        {"from": "start", "to": "take_task"},
+        {"from": "take_task", "when": "ok", "to": "show"},
+        {"from": "show", "when": "answer", "to": "take_task"},
+    ],
+}
+
 
 async def demo_teacher_id() -> str:
     """Выдуманный преподаватель в рабочей базе; создаётся один раз."""
@@ -108,7 +142,9 @@ def main() -> int:
             print(f"   узел «{event['node_id']}»: {event['type']} {event['data'] or ''}")
         print("Готово: пайплайн запускается запросом, события видны в журнале.")
         check_bank(api)
-    print("Готово: задачи создаются и выбираются по теме и сложности.")
+        print("Готово: задачи создаются и выбираются по теме и сложности.")
+        check_answer(api)
+    print("Готово: запуск встаёт на паузу и продолжается после ответа.")
     return 0
 
 
@@ -131,6 +167,38 @@ def check_bank(api: httpx.Client) -> None:
         raise SystemExit(f"Блок не выбрал задачу. Журнал: {events}")
     task = next(task for task in tasks if task["id"] == chosen[0]["task_id"])
     print(f"   блок выбрал задачу сложности {task['difficulty']}: {task['statement']}")
+
+
+def check_answer(api: httpx.Client) -> None:
+    pipeline = check(api.post("/pipelines", json=LESSON_PIPELINE))
+    run = check(
+        api.post(f"/pipelines/{pipeline['id']}/runs", json={"params": {"topic": DEMO_TOPIC}})
+    )
+    print(f"6. Урок из двух задач запущен: {run['id']}")
+    number = 0
+    while run["status"] == "waiting":
+        number += 1
+        [waiting] = run["waiting"]
+        screen = waiting["data"]
+        print(f"   запуск ждёт ответа на узле {waiting['node_id']}: {screen['statement']}")
+        body = {
+            "node_id": waiting["node_id"],
+            "response": {
+                "action": "answer",
+                "answer": {
+                    "task_id": screen["task_id"],
+                    "form": "text",
+                    "text": f"демо-ответ {number}",
+                },
+            },
+        }
+        run = check(api.post(f"/runs/{run['id']}/responses", json=body))
+        print(f"   ответ {number} принят, статус запуска «{run['status']}»")
+    if run["status"] != "done" or number != 2:
+        raise SystemExit(f"Ожидались два ответа и конец урока, а запуск: {run}")
+    steps = [event["type"] for event in check(api.get(f"/runs/{run['id']}/events"))]
+    paused, resumed = steps.count("node_waiting"), steps.count("node_resumed")
+    print(f"   в журнале пауз: {paused}, продолжений: {resumed}")
 
 
 if __name__ == "__main__":
