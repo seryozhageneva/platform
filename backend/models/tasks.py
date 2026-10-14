@@ -1,7 +1,8 @@
 """Репозиторий банка задач: создать задачу и найти задачи по предмету, теме и сложности.
 
-Задача принадлежит преподавателю-автору; поиск всегда идёт в пределах владельца. API банка
-и блок «Источник: хранилище» появятся в задаче 09.
+Задача принадлежит преподавателю-автору; поиск всегда идёт в пределах владельца. Банк у
+каждого преподавателя свой (ADR 0015). Через API банк читает и пишет преподаватель
+(`backend/api/tasks.py`), блоки читают его через хранилище платформы (`platform_store.py`).
 """
 
 import uuid
@@ -47,6 +48,43 @@ class TaskRepository:
         )
         async with self._sessions.begin() as session:
             session.add(row)
+        return row
+
+    async def update(
+        self,
+        owner_id: uuid.UUID,
+        task_id: uuid.UUID,
+        *,
+        subject: str,
+        topic: str,
+        difficulty: int,
+        statement: str,
+        check_method: CheckMethod,
+        answer: str | None,
+        solution: str | None,
+        tests: str | None,
+        rubric: str | None,
+        status: TaskStatus,
+    ) -> TaskRow | None:
+        """Заменяет все поля своей задачи; `None` — такой задачи среди своих нет."""
+        query = select(TaskRow).where(TaskRow.id == task_id, TaskRow.owner_id == owner_id)
+        async with self._sessions.begin() as session:
+            row = await session.scalar(query)
+            if row is None:
+                return None
+            row.subject = subject
+            row.topic = topic
+            row.difficulty = difficulty
+            row.statement = statement
+            row.check_method = check_method
+            row.answer = answer
+            row.solution = solution
+            row.tests = tests
+            row.rubric = rubric
+            row.status = status
+            # Время правки ставит сама база: читаем его, пока сессия открыта.
+            await session.flush()
+            await session.refresh(row)
         return row
 
     async def get(self, owner_id: uuid.UUID, task_id: uuid.UUID) -> TaskRow | None:

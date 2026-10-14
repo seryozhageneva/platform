@@ -336,6 +336,7 @@ def test_builtin_blocks_load_without_problems():
     registry = load_registry(BUILTIN_BLOCKS)
     assert [str(problem) for problem in registry.problems] == []
     assert set(registry.blocks) == set(registry.manifests)
+    assert "source.task_bank" in registry.blocks
 
 
 def test_example_manifests_give_agents_only_reading_tools(example_manifests):

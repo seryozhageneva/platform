@@ -1,0 +1,26 @@
+# Блок «Источник: банк задач». Копия этого манифеста лежит в docs/examples/manifests/:
+# по ней тесты контракта проверяют стыковку сценариев. Тест следит, чтобы копии совпадали.
+id: source.task_bank
+version: 0.1.0
+name: "Источник: банк задач"
+description: >-
+  Берёт из банка одну задачу нужной темы и сложности либо конкретную задачу по номеру.
+  Если подана прошлая задача и вердикт по ней, сам подстраивает сложность: после неудачи —
+  проще, после успеха — та же или выше.
+author: platform
+category: source
+inputs:
+  - {name: previous, title: Прошлая задача, type: Task, required: false}
+  - {name: verdict, title: Вердикт по прошлой задаче, type: Verdict, required: false}
+outputs:
+  - {name: task, title: Задача, type: Task}
+config:
+  type: object
+  properties:
+    topic: {title: Тема, type: string}
+    subject: {title: Предмет, type: string}
+    task_id: {title: Конкретная задача, type: string}
+    difficulty: {title: Стартовая сложность, type: integer, minimum: 1, default: 1}
+    adapt: {title: Подстраивать сложность, type: boolean, default: true}
+outcomes: [ok, empty]
+runtime: {type: python, entrypoint: "blocks.source.task_bank:run"}

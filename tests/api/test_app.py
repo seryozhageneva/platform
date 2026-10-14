@@ -35,6 +35,10 @@ def test_openapi_describes_every_endpoint(client):
         ("POST", f"{API}/pipelines/{{pipeline_id}}/runs"),
         ("GET", f"{API}/runs/{{run_id}}"),
         ("GET", f"{API}/runs/{{run_id}}/events"),
+        ("POST", f"{API}/tasks"),
+        ("GET", f"{API}/tasks"),
+        ("GET", f"{API}/tasks/{{task_id}}"),
+        ("PUT", f"{API}/tasks/{{task_id}}"),
     }
     # Граф пайплайна описан моделью контракта, а не «любым JSON».
     assert "Pipeline" in schema.json()["components"]["schemas"]

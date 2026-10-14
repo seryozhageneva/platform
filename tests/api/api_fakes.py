@@ -1,7 +1,7 @@
 """Подделки для тестов API: фейковые блоки, пайплайны из них и сохранение запросом.
 
-Настоящих блоков в `blocks/` ещё нет, поэтому блоки создаются во временной папке — так же,
-как администратор кладёт в папку блок стороннего автора.
+Фейковые блоки создаются во временной папке — так же, как администратор кладёт в папку блок
+стороннего автора. Настоящий блок из `blocks/` проверяется в `test_tasks_api.py`.
 """
 
 from pathlib import Path
@@ -47,6 +47,15 @@ async def run(inputs, config, context):
     return Done(outputs={"text": {"text": reply.text}})
 """
 
+BANK = """
+from backend.core.contracts.run import BlockEvent, Done
+
+
+async def run(inputs, config, context):
+    tasks = await context.store.find_tasks()
+    return Done(events=[BlockEvent(type="tasks_seen", data={"ids": [task.id for task in tasks]})])
+"""
+
 BROKEN = """
 async def run(inputs, config, context):
     raise RuntimeError("модель недоступна")
@@ -66,6 +75,8 @@ FAKE_BLOCKS: dict[str, tuple[str | None, dict[str, Any]]] = {
     # Блок с последствиями: без Подтверждения перед ним валидатор предупреждает.
     "sink.fake_send": (KEEP, {"inputs": [TEXT], "side_effects": True}),
     "ai_process.fake_ask": (ASK, {"inputs": [TEXT], "outputs": [TEXT]}),
+    # Читает банк через хранилище платформы и пишет в журнал, какие задачи увидел.
+    "source.fake_bank": (BANK, {}),
     "transform.fake_broken": (BROKEN, {"inputs": [TEXT], "outputs": [TEXT]}),
     # Блок-обёртка над MCP-инструментом: MCP-клиента ещё нет, вызвать его нечем.
     "sink.fake_mail": (
@@ -138,3 +149,10 @@ def saved(client: TestClient, headers: dict[str, str], pipeline: dict[str, Any])
     response = client.post("/api/v1/pipelines", json=pipeline, headers=headers)
     assert response.status_code == 201, response.text
     return response.json()["id"]
+
+
+def launch(client: TestClient, headers: dict[str, str], pipeline_id: str, **params: Any):
+    """Запускает пайплайн вручную с указанными параметрами; возвращает ответ сервера."""
+    return client.post(
+        f"/api/v1/pipelines/{pipeline_id}/runs", json={"params": params}, headers=headers
+    )

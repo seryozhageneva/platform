@@ -6,15 +6,16 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from backend.core.contracts.pipeline import Pipeline
+from backend.core.contracts.ports import CheckMethod
 from backend.core.contracts.screens import ScreenType
 from backend.core.contracts.state import RunState, RunStatus
 from backend.core.contracts.wiring import Problem
-from backend.models.tables import EventRow, PipelineRow
+from backend.models.tables import EventRow, PipelineRow, TaskRow, TaskStatus
 
 
 class ProblemOut(BaseModel):
@@ -126,4 +127,74 @@ class EventOut(BaseModel):
     def of(cls, row: EventRow) -> "EventOut":
         return cls(
             id=row.id, node_id=row.node_id, type=row.type, data=row.data, created_at=row.created_at
+        )
+
+
+# Тема и предмет сравниваются точно, поэтому пробелы по краям обрезаются ещё при записи.
+Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+# Чем проверяется задача каждого способа: без этого поля проверка в уроке упадёт.
+NEEDED_FOR_CHECK = {
+    CheckMethod.SHORT_ANSWER: ("answer", "ответ"),
+    CheckMethod.CODE: ("tests", "тесты"),
+    CheckMethod.LONG_ANSWER: ("rubric", "рубрика"),
+}
+
+
+class TaskFields(BaseModel):
+    """Поля задачи банка — те же, что у типа `Task` из контракта, плюс статус."""
+
+    subject: Label
+    topic: Label
+    difficulty: int = Field(ge=1)
+    statement: str = Field(min_length=1, description="Условие: Markdown и LaTeX")
+    check_method: CheckMethod
+    answer: str | None = None
+    solution: str | None = None
+    tests: str | None = None
+    rubric: str | None = None
+    # Задачу, которую преподаватель пишет сам, он и подтверждает. Черновики — для задач,
+    # которые сочинил ИИ: их запишет блок после Подтверждения (задача 22).
+    status: TaskStatus = TaskStatus.APPROVED
+
+
+class TaskIn(TaskFields):
+    """Задача банка, как её присылает преподаватель (ADR 0015)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _approved_can_be_checked(self) -> Self:
+        field, title = NEEDED_FOR_CHECK[self.check_method]
+        if self.status is TaskStatus.APPROVED and not getattr(self, field):
+            raise ValueError(
+                f"у подтверждённой задачи со способом проверки «{self.check_method.value}» "
+                f"должно быть поле «{field}» ({title}); неполную задачу сохраните черновиком"
+            )
+        return self
+
+
+class TaskOut(TaskFields):
+    """Задача банка в ответе: поля, номер и время."""
+
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, row: TaskRow) -> "TaskOut":
+        return cls(
+            id=row.id,
+            subject=row.subject,
+            topic=row.topic,
+            difficulty=row.difficulty,
+            statement=row.statement,
+            check_method=CheckMethod(row.check_method),
+            answer=row.answer,
+            solution=row.solution,
+            tests=row.tests,
+            rubric=row.rubric,
+            status=TaskStatus(row.status),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
         )

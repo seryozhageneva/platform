@@ -6,6 +6,7 @@
 """
 
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -18,7 +19,9 @@ from backend.llm.factory import make_llm
 from backend.models.db import Sessions, make_engine, make_sessions
 from backend.models.llm_calls import LLMCallRepository
 from backend.models.pipelines import PipelineRepository
+from backend.models.platform_store import PgPlatformStore
 from backend.models.run_store import PgRunStore
+from backend.models.tasks import TaskRepository
 from backend.models.users import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -31,33 +34,41 @@ class Assembly:
         self.registry = registry
         self.users = UserRepository(sessions)
         self.pipelines = PipelineRepository(sessions)
+        self.tasks = TaskRepository(sessions)
         self.runs = PgRunStore(sessions)
         self._llm = llm
-        self._blocks = {name: _tagging(block) for name, block in registry.blocks.items()}
+        self._blocks = {name: self._serviced(block) for name, block in registry.blocks.items()}
 
     def engine(self) -> Engine:
         """Движок с настоящим хранилищем. Он ничего не помнит, поэтому на каждый раз новый."""
         return Engine(self.runs, self._blocks, llm=self._llm)
 
+    def _serviced(self, block: LoadedBlock) -> LoadedBlock:
+        """Тот же блок, но перед вызовом сборка кладёт в `context` службы этого запуска.
 
-def _tagging(block: LoadedBlock) -> LoadedBlock:
-    """Тот же блок, но модель он получает с пометкой своего запуска и узла (ADR 0013).
+        Модель блок получает с пометкой своего запуска и узла (ADR 0013): движок выдаёт всем
+        блокам одну модель и узел ей не сообщает, а запуск и узел есть в `context`, — так
+        вызов попадает в журнал вызовов с ними. Хранилище платформы — ограниченное
+        преподавателем этого запуска (ADR 0014, ADR 0015): чужих задач блок не увидит.
+        """
+        tasks = self.tasks
 
-    Движок выдаёт всем блокам одну модель и узел ей не сообщает. Запуск и узел есть в
-    `context`, поэтому пометку ставит сборка — так вызов попадает в журнал вызовов с ними.
-    """
+        async def run(
+            inputs: dict[str, Any], config: dict[str, Any], context: RunContext
+        ) -> Done | Waiting:
+            services: dict[str, Any] = {}
+            # Пометку умеет ставить слой моделей; у фейковой модели из тестов такого метода нет.
+            bound = getattr(context.llm, "bound", None)
+            if bound is not None:
+                services["llm"] = bound(run_id=context.run_id, node_id=context.node_id)
+            # Без преподавателя хранилище не выдаётся: ограничить его было бы некем.
+            if context.teacher_id is not None:
+                services["store"] = PgPlatformStore(tasks, uuid.UUID(context.teacher_id))
+            if services:
+                context = context.model_copy(update=services)
+            return await block.run(inputs, config, context)
 
-    async def run(
-        inputs: dict[str, Any], config: dict[str, Any], context: RunContext
-    ) -> Done | Waiting:
-        # Пометку умеет ставить слой моделей; у фейковой модели из тестов такого метода нет.
-        bound = getattr(context.llm, "bound", None)
-        if bound is not None:
-            tagged = bound(run_id=context.run_id, node_id=context.node_id)
-            context = context.model_copy(update={"llm": tagged})
-        return await block.run(inputs, config, context)
-
-    return LoadedBlock(block.manifest, run)
+        return LoadedBlock(block.manifest, run)
 
 
 @asynccontextmanager

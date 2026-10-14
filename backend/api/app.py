@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException
 
-from backend.api import pipelines, runs
+from backend.api import pipelines, runs, tasks
 from backend.api.errors import ApiError
 from backend.api.schemas import ErrorOut, ProblemOut
 from backend.core.contracts.base import explain
@@ -44,6 +44,7 @@ def create_app(assembly: Assembly | None = None) -> FastAPI:
     api = APIRouter(prefix=PREFIX)
     api.include_router(pipelines.router)
     api.include_router(runs.router)
+    api.include_router(tasks.router)
 
     @api.get("/health", tags=["Служебное"], summary="Сервер работает")
     async def health() -> dict[str, str]:
