@@ -1,12 +1,13 @@
-"""Фейковая модель: отвечает заданным в тесте и запоминает, о чём её спросили."""
+"""Подделки служб: фейковая модель отвечает заданным в тесте, подделка хранилища ищет задачи."""
 
 import asyncio
 
 import pytest
 
-from backend.core.contracts.interfaces import LLMClient, LLMMessage
+from backend.core.contracts.interfaces import LLMClient, LLMMessage, PlatformStore
+from backend.core.contracts.ports import CheckMethod, Task
 from backend.core.contracts.run import Done, RunContext
-from backend.core.contracts.testing import FakeLLM, FakeLLMError
+from backend.core.contracts.testing import FakeLLM, FakeLLMError, FakeStore
 
 ASK = [LLMMessage(role="user", content="Дай подсказку к задаче")]
 HINT_SCHEMA = {
@@ -131,3 +132,75 @@ def test_schema_reference_that_leads_nowhere_is_a_clear_error(monkeypatch):
     for ref in ["#/$defs/missing", "http://example.test/schema.json"]:
         with pytest.raises(FakeLLMError, match="ссылка, которая никуда не ведёт"):
             complete(FakeLLM([{"level": 1}]), schema={"$ref": ref})
+
+
+def task(task_id: str, topic: str, difficulty: int, subject: str = "math") -> Task:
+    return Task(
+        id=task_id,
+        subject=subject,
+        topic=topic,
+        difficulty=difficulty,
+        statement=f"Задача {task_id}",
+        check_method=CheckMethod.SHORT_ANSWER,
+        answer="1",
+    )
+
+
+BANK = [
+    task("log-1", "логарифмы", 1),
+    task("log-2", "логарифмы", 2),
+    task("deg-1", "степени", 1),
+    task("py-1", "циклы", 1, subject="informatics"),
+]
+
+
+def find(store: FakeStore, **conditions) -> list[str]:
+    return [found.id for found in asyncio.run(store.find_tasks(**conditions))]
+
+
+def test_fake_store_fits_the_contract_interface():
+    assert isinstance(FakeStore(), PlatformStore)
+
+
+def test_store_finds_tasks_by_topic_and_difficulty():
+    store = FakeStore(BANK)
+    assert find(store, topic="логарифмы") == ["log-1", "log-2"]
+    assert find(store, difficulty=1) == ["log-1", "deg-1", "py-1"]
+    assert find(store, topic="логарифмы", difficulty=2) == ["log-2"]
+    assert find(store, subject="informatics") == ["py-1"]
+
+
+def test_store_without_conditions_gives_all_tasks():
+    assert find(FakeStore(BANK)) == ["log-1", "log-2", "deg-1", "py-1"]
+
+
+def test_nothing_found_is_an_empty_list_not_an_error():
+    assert find(FakeStore(BANK), topic="интегралы") == []
+
+
+def test_store_gives_one_task_by_id():
+    store = FakeStore(BANK)
+    assert asyncio.run(store.get_task("deg-1")) == BANK[2]
+    assert asyncio.run(store.get_task("нет-такой")) is None
+
+
+def test_block_gets_the_store_through_context():
+    """Так подделкой хранилища пользуется тест блока: кладёт её в `context.store`."""
+
+    async def take_task(inputs, config, context: RunContext) -> Done:
+        found = await context.store.find_tasks(
+            topic=config["topic"], difficulty=config["difficulty"]
+        )
+        if not found:
+            return Done(outcome="empty")
+        return Done(outputs={"task": found[0].model_dump(mode="json")})
+
+    context = RunContext(
+        run_id="run-1", node_id="take_task", pipeline_id="pipeline-1", store=FakeStore(BANK)
+    )
+
+    result = asyncio.run(take_task({}, {"topic": "логарифмы", "difficulty": 2}, context))
+    assert result.outputs["task"]["id"] == "log-2"
+
+    result = asyncio.run(take_task({}, {"topic": "интегралы", "difficulty": 1}, context))
+    assert result.outcome == "empty"

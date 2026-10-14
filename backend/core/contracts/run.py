@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 from backend.core.contracts.base import NAME, Strict, explain
-from backend.core.contracts.interfaces import LLMClient, ToolClient
+from backend.core.contracts.interfaces import LLMClient, PlatformStore, ToolClient
 from backend.core.contracts.manifest import Kind, Manifest
 from backend.core.contracts.screens import SCREEN_DATA, SCREEN_RESPONSE, ScreenType
 
@@ -69,6 +69,7 @@ class RunContext(Strict):
     # Службы. При вызове блока по сети (mcp, http) не передаются.
     llm: LLMClient | None = Field(None, exclude=True)
     tools: ToolClient | None = Field(None, exclude=True)
+    store: PlatformStore | None = Field(None, exclude=True)
 
 
 class RunRequest(Strict):
