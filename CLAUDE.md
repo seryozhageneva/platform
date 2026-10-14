@@ -51,7 +51,7 @@ uv run lint-imports              правила импортов из .importlin
 uv run python -m backend.core.contracts.schema_export    обновить docs/schemas/ после правки контракта
 uv run python -m experiments.llm_check    ручной вызов настоящей модели: идёт в сеть, нужны ключ и сертификат в .env (ADR 0012)
 uv run python -m backend.api     сервер API на http://127.0.0.1:8000, описание — на странице /docs; нужны база и LLM_PROVIDER в .env (ADR 0013)
-uv run python -m experiments.api_check    ручная проверка API на поднятом сервере: пишет в рабочую базу выдуманного преподавателя
+uv run python -m experiments.api_check    ручная проверка API на поднятом сервере: пишет в рабочую базу выдуманного преподавателя и его ответы на паузе
 ```
 
 CI (`.github/workflows/ci.yml`) запускает то же самое на каждый pull request. Тесты и линтер фронтенда появятся в задаче 13.

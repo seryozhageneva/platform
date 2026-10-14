@@ -19,6 +19,7 @@ TABLES = {
     "runs",
     "events",
     "llm_calls",
+    "submissions",
 }
 
 

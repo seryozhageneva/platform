@@ -1,7 +1,8 @@
 """Таблицы базы данных (ADR 0007).
 
-Десять таблиц: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
-запуски, журнал событий и журнал вызовов модели (ADR 0012). Остальные сущности из
+Одиннадцать таблиц: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
+запуски, журнал событий, журнал вызовов модели (ADR 0012) и работы учеников (ADR 0016).
+Остальные сущности из
 docs/vision.md добавляются миграциями в задачах, где они впервые нужны. После правки этого
 файла нужна новая миграция: тест `tests/models/test_migrations.py` падает, если забыли
 таблицу, столбец или индекс. Изменение допустимых значений (`CHECK`) он не видит — их
@@ -32,7 +33,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from backend.core.contracts.ports import CheckMethod
+from backend.core.contracts.ports import AnswerForm, CheckMethod
 from backend.core.contracts.state import RunStatus
 
 
@@ -52,6 +53,20 @@ class TaskStatus(StrEnum):
 
     DRAFT = "draft"
     APPROVED = "approved"
+
+
+class SubmissionSource(StrEnum):
+    """Откуда работа: ответ в уроке на платформе или работа, сданная в Moodle (задача 23)."""
+
+    PLATFORM = "platform"
+    MOODLE = "moodle"
+
+
+class VerdictStatus(StrEnum):
+    """Оценку ИИ преподаватель может подтвердить или исправить (задачи 18 и 21)."""
+
+    PRELIMINARY = "preliminary"
+    CONFIRMED = "confirmed"
 
 
 def _one_of(column: str, values: type[StrEnum]) -> CheckConstraint:
@@ -276,4 +291,39 @@ class LLMCallRow(Base):
     output_tokens: Mapped[int]
     latency_ms: Mapped[int]
     error: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class SubmissionRow(Base):
+    """Работа ученика (ADR 0016): принятый ответ в уроке или работа, сданная в Moodle.
+
+    Ученик пуст у пробного запуска преподавателя: у запуска «вручную» ученика нет. Номер
+    задачи — строка без связи с банком: у задания Moodle номер не из нашей базы. Файл не
+    хранится в базе — только ссылка на него (тип `File` из контракта). Оценка, комментарий
+    и статус вердикта пусты, пока работу не проверили (задачи 11 и 21).
+    """
+
+    __tablename__ = "submissions"
+    __table_args__ = (
+        _one_of("source", SubmissionSource),
+        _one_of("form", AnswerForm),
+        _one_of("verdict_status", VerdictStatus),
+        Index("ix_submissions_run", "run_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    student_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    node_id: Mapped[str | None]
+    task_id: Mapped[str | None]
+    source: Mapped[str] = mapped_column(String(20))
+    form: Mapped[str | None] = mapped_column(String(20))
+    text: Mapped[str | None]
+    # Нет файла — пустое значение базы, а не JSON `null`: так работает поиск `file IS NULL`.
+    file: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    score: Mapped[float | None]
+    max_score: Mapped[float | None]
+    comment: Mapped[str | None]
+    verdict_status: Mapped[str | None] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

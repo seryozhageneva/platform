@@ -1,7 +1,8 @@
-"""Эндпоинты запусков: запустить вручную, посмотреть состояние и журнал событий.
+"""Эндпоинты запусков: запустить вручную, ответить на паузе, посмотреть состояние и журнал.
 
-Запрос на запуск отвечает, когда запуск закончился, встал на паузу или остановился с
-ошибкой: движок выполняется прямо в запросе (ADR 0013).
+Запрос на запуск и ответ отвечают, когда запуск закончился, встал на паузу или остановился
+с ошибкой: движок выполняется прямо в запросе (ADR 0013). Пока у ученика нет кабинета
+(задачи 13 и 14), на паузе своего запуска отвечает преподаватель (ADR 0016).
 """
 
 import uuid
@@ -10,11 +11,13 @@ from fastapi import APIRouter
 
 from backend.api.deps import REFUSALS, Assembled, Teacher
 from backend.api.errors import ApiError
-from backend.api.schemas import EventOut, LaunchRequest, RunOut
+from backend.api.schemas import ErrorOut, EventOut, LaunchRequest, ResponseIn, RunOut
 from backend.core.contracts.state import RunState
+from backend.core.engine import ResponseRejected
 from backend.models.tables import UserRow
 from backend.triggers.assembly import Assembly
 from backend.triggers.manual import LaunchRefused, PipelineNotFound, start_manual
+from backend.triggers.responses import NotWaiting, answer_run
 
 router = APIRouter(tags=["Запуски"], responses=REFUSALS)
 
@@ -56,3 +59,21 @@ async def get_run_events(
 ) -> list[EventOut]:
     await _own_run(assembly, teacher, run_id)
     return [EventOut.of(row) for row in await assembly.runs.events(str(run_id))]
+
+
+@router.post(
+    "/runs/{run_id}/responses",
+    summary="Ответить запуску, который ждёт человека",
+    responses={409: {"model": ErrorOut, "description": "Запуск не ждёт ответа на этом узле"}},
+)
+async def respond(
+    run_id: uuid.UUID, body: ResponseIn, teacher: Teacher, assembly: Assembled
+) -> RunOut:
+    state = await _own_run(assembly, teacher, run_id)
+    try:
+        state = await answer_run(assembly, state, body.node_id, body.response)
+    except NotWaiting as error:
+        raise ApiError(409, str(error)) from None
+    except ResponseRejected as error:
+        raise ApiError(422, str(error)) from None
+    return RunOut.of(state)

@@ -83,6 +83,19 @@ class WaitingOut(BaseModel):
     node_id: str
     who: str
     screen: ScreenType
+    # Данные экрана: без них отвечающий не видит, на что отвечает. Форма ответа ученика
+    # ответа и эталонного решения не содержит — так устроен экран в контракте.
+    data: dict[str, Any]
+
+
+class ResponseIn(BaseModel):
+    """Ответ человека запуску на паузе: на каком узле и что он ввёл на экране."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    # Форма ответа своя у каждого экрана; её проверяет движок (`response_problems`).
+    response: dict[str, Any]
 
 
 class RunOut(BaseModel):
@@ -107,7 +120,7 @@ class RunOut(BaseModel):
             params=state.params,
             current=state.current,
             waiting=[
-                WaitingOut(node_id=item.node_id, who=item.who, screen=item.screen)
+                WaitingOut(node_id=item.node_id, who=item.who, screen=item.screen, data=item.data)
                 for item in state.waiting
             ],
             error=state.error,
