@@ -1,0 +1,18 @@
+# Блок «Проверка: по эталону». Копия этого манифеста лежит в docs/examples/manifests/:
+# по ней тесты контракта проверяют стыковку сценариев. Тест следит, чтобы копии совпадали.
+id: check.exact
+version: 0.1.0
+name: "Проверка: по эталону"
+description: >-
+  Сравнивает короткий ответ ученика с эталонным ответом задачи как математические выражения
+  (SymPy), а не как текст: «2x+2» и «2(x+1)», «0,5» и «1/2» — один ответ.
+author: platform
+category: check
+inputs:
+  - {name: task, title: Задача с эталонным ответом, type: Task}
+  - {name: answer, title: Ответ, type: Answer}
+outputs:
+  - {name: verdict, title: Вердикт, type: Verdict}
+outcomes: [correct, wrong]
+runtime: {type: python, entrypoint: "blocks.check.exact:run"}
+side_effects: false
