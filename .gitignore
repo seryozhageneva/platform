@@ -45,6 +45,10 @@ out/
 # Копии репозитория для параллельных сессий Claude Code
 .claude/worktrees/
 
+# Хук форматирования Codex: в hooks.json полный путь к папке на компьютере автора (см. HANDOFF.md)
+.codex/hooks.json
+.codex/hooks/
+
 # Данные учеников и пилота: репозиторий публичный, сюда они не попадают никогда
 experiments/raw/
 uploads/
