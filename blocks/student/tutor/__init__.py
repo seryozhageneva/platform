@@ -46,7 +46,9 @@ async def run(inputs: dict[str, Any], config: dict[str, Any], context: RunContex
         previous=previous.text if previous else None,
         model=model,
     )
-    approved = bool(candidate) and await approve_hint(
+    if not candidate:
+        return Done(outcome="give_up")
+    approved = await approve_hint(
         llm, task, level, candidate, previous=previous.text if previous else None, model=model
     )
     event = BlockEvent(
@@ -99,7 +101,8 @@ async def draft_hint(
         ),
         model=model,
     )
-    return reply.text.strip()
+    # PostgreSQL не сохраняет текст с нулевым символом.
+    return "" if "\x00" in reply.text else reply.text.strip()
 
 
 async def approve_hint(

@@ -72,11 +72,13 @@ def test_stops_after_third_hint_without_model_call():
     assert llm.calls == []
 
 
-def test_empty_candidate_is_not_published():
-    llm = FakeLLM(["  "])
+@pytest.mark.parametrize("candidate", ["  ", "Подсказка\x00"])
+def test_unusable_candidate_is_not_sent_to_controller(candidate):
+    llm = FakeLLM([candidate])
     result = call(llm)
     assert result.outcome == "give_up"
     assert result.outputs == {}
+    assert result.events == []
     assert len(llm.calls) == 1
 
 
