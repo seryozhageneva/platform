@@ -7,13 +7,13 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import cast, func, select
+from sqlalchemy.dialects.postgresql import JSONB, JSONPATH, insert
 
 from backend.core.contracts.run import BlockEvent
 from backend.core.contracts.state import RunState, RunStatus
 from backend.models.db import Sessions
-from backend.models.tables import EventRow, RunRow, SubmissionRow
+from backend.models.tables import EventRow, PipelineVersionRow, RunRow, SubmissionRow, UserRow
 
 # Поля состояния, у которых в таблице свой столбец. Все прочие поля `RunState` уходят в
 # `state`, поэтому новое поле состояния не требует миграции.
@@ -37,6 +37,53 @@ class PgRunStore:
     def stage_submission(self, row: SubmissionRow) -> None:
         """Работы сохранятся с успешным шагом, который принял ответы."""
         self._pending_submissions.append(row)
+
+    async def for_teacher(self, teacher_id: uuid.UUID) -> list[dict[str, Any]]:
+        waiting_nodes = func.jsonb_path_query_array(
+            RunRow.state, cast("$.waiting[*].node_id", JSONPATH), type_=JSONB
+        )
+        waiting_roles = func.jsonb_path_query_array(
+            RunRow.state, cast("$.waiting[*].who", JSONPATH), type_=JSONB
+        )
+        query = (
+            select(
+                RunRow.id,
+                RunRow.pipeline_id,
+                PipelineVersionRow.graph["name"].as_string().label("pipeline_name"),
+                RunRow.pipeline_version,
+                UserRow.name.label("student_name"),
+                RunRow.status,
+                RunRow.state["current"].label("current"),
+                waiting_nodes.label("waiting_nodes"),
+                waiting_roles.label("waiting_roles"),
+                RunRow.error,
+                RunRow.updated_at,
+            )
+            .join(
+                PipelineVersionRow,
+                (PipelineVersionRow.pipeline_id == RunRow.pipeline_id)
+                & (PipelineVersionRow.version == RunRow.pipeline_version),
+            )
+            .outerjoin(
+                UserRow, (UserRow.id == RunRow.student_id) & (UserRow.owner_id == teacher_id)
+            )
+            .where(RunRow.teacher_id == teacher_id)
+            .order_by(RunRow.updated_at.desc(), RunRow.id.desc())
+        )
+        async with self._sessions() as session:
+            rows = (await session.execute(query)).mappings()
+            result = []
+            for row in rows:
+                summary = dict(row)
+                summary["current"] = summary["current"] or []
+                summary["waiting"] = [
+                    {"node_id": node, "who": who}
+                    for node, who in zip(
+                        summary.pop("waiting_nodes"), summary.pop("waiting_roles"), strict=True
+                    )
+                ]
+                result.append(summary)
+            return result
 
     async def load(self, run_id: str) -> RunState | None:
         key = _uuid_or_none(run_id)

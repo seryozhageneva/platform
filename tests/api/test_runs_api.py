@@ -7,11 +7,15 @@
 import asyncio
 import copy
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from api_fakes import THREE_FAKES, chain, launch, saved
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
+from backend.core.contracts.screens import ScreenType
+from backend.core.contracts.state import RunState, RunStatus, WaitingFor
 from backend.models.llm_calls import LLMCallRepository
+from backend.models.run_store import PgRunStore
 from backend.models.tables import RunRow
 
 API = "/api/v1"
@@ -78,6 +82,115 @@ def test_every_launch_is_a_new_run(client, me):
     second = launch(client, me, pipeline_id).json()
 
     assert first["id"] != second["id"]
+
+
+def test_manual_launch_requires_matching_version_if_requested(client, me):
+    pipeline_id = saved(client, me, THREE_FAKES)
+    renamed = {**THREE_FAKES, "name": "Новая версия"}
+    assert client.put(f"{API}/pipelines/{pipeline_id}", headers=me, json=renamed).status_code == 200
+    url = f"{API}/pipelines/{pipeline_id}/runs"
+
+    stale = client.post(url, headers=me, json={"expected_version": 1})
+    assert stale.status_code == 422
+    assert stale.json()["problems"][0]["code"] == "version_changed"
+    assert client.get(f"{API}/runs", headers=me).json() == []
+
+    started = client.post(url, headers=me, json={"expected_version": 2})
+    assert started.status_code == 201
+    assert started.json()["pipeline_version"] == 2
+
+
+def test_teacher_lists_only_own_runs_with_progress_and_original_version(
+    client, me, stranger, sessions, teacher
+):
+    pipeline_id = saved(client, me, THREE_FAKES)
+    finished = launch(client, me, pipeline_id).json()
+    renamed = {**THREE_FAKES, "name": "Переименованный пайплайн"}
+    assert client.put(f"{API}/pipelines/{pipeline_id}", headers=me, json=renamed).status_code == 200
+    student = client.post(f"{API}/students", headers=me, json={"name": "Сова"}).json()
+    foreign_pipeline = saved(client, stranger, THREE_FAKES)
+    foreign = launch(client, stranger, foreign_pipeline).json()
+
+    async def add_runs():
+        store = PgRunStore(sessions)
+        waiting = []
+        for who in ("student", "teacher"):
+            state = RunState(
+                run_id=str(uuid.uuid4()),
+                pipeline_id=pipeline_id,
+                pipeline_version=2,
+                student_id=student["id"] if who == "student" else None,
+                teacher_id=str(teacher.id),
+                status=RunStatus.WAITING,
+                current=["step"],
+                waiting=[
+                    WaitingFor(
+                        node_id="step",
+                        who=who,
+                        screen=ScreenType.ANSWER_FORM
+                        if who == "student"
+                        else ScreenType.REVIEW_TABLE,
+                        data={"statement": "Только для подробностей"},
+                    )
+                ],
+            )
+            await store.save(state)
+            waiting.append(uuid.UUID(state.run_id))
+        failed = uuid.uuid4()
+        await store.save(
+            RunState(
+                run_id=str(failed),
+                pipeline_id=pipeline_id,
+                pipeline_version=2,
+                teacher_id=str(teacher.id),
+                status=RunStatus.ERROR,
+                current=["broken"],
+                error="Не удалось выполнить шаг",
+            )
+        )
+        now = datetime.now(UTC)
+        async with sessions.begin() as session:
+            await session.execute(
+                update(RunRow).where(RunRow.id.in_(waiting)).values(updated_at=now)
+            )
+            await session.execute(
+                update(RunRow)
+                .where(RunRow.id == failed)
+                .values(updated_at=now + timedelta(seconds=1))
+            )
+            await session.execute(
+                update(RunRow)
+                .where(RunRow.id == uuid.UUID(finished["id"]))
+                .values(updated_at=now - timedelta(seconds=1))
+            )
+        return *waiting, failed
+
+    student_run, approval_run, failed = asyncio.run(add_runs())
+    response = client.get(f"{API}/runs", headers=me)
+    assert response.status_code == 200, response.text
+    runs = response.json()
+    assert [run["id"] for run in runs] == [
+        str(failed),
+        *(str(key) for key in sorted((student_run, approval_run), reverse=True)),
+        finished["id"],
+    ]
+    by_id = {run["id"]: run for run in runs}
+    assert runs[0]["status"] == "error"
+    assert runs[0]["current"] == ["broken"]
+    assert runs[0]["error"] == "Не удалось выполнить шаг"
+    assert runs[0]["pipeline_name"] == renamed["name"]
+    assert runs[-1]["status"] == "done"
+    assert runs[-1]["student_name"] is None
+    assert runs[-1]["pipeline_name"] == THREE_FAKES["name"]
+    assert runs[-1]["pipeline_version"] == 1
+    assert by_id[str(student_run)]["student_name"] == "Сова"
+    assert by_id[str(student_run)]["waiting"] == [{"node_id": "step", "who": "student"}]
+    assert by_id[str(approval_run)]["waiting"] == [{"node_id": "step", "who": "teacher"}]
+    assert {run["id"] for run in client.get(f"{API}/runs", headers=stranger).json()} == {
+        foreign["id"]
+    }
+    assert client.get(f"{API}/runs/{foreign['id']}/events", headers=me).status_code == 404
+    assert client.get(f"{API}/runs").status_code == 401
 
 
 def test_pipeline_without_manual_launch_is_not_started(client, me):

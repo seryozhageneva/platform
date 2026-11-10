@@ -52,3 +52,6 @@ main:has(.pipeline-workspace) { width: min(100rem, calc(100% - 2rem)); }
   .pipeline-layout { grid-template-columns: minmax(0, 1fr); }
   .pipeline-canvas { height: 30rem; }
 }
+
+.teacher-runs section { margin-block: 1rem; }
+.teacher-runs li { margin-block: 0.35rem; }

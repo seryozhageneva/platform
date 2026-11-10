@@ -13,6 +13,7 @@ export type BlockCatalogItem = components["schemas"]["BlockCatalogItem"];
 export type Pipeline = components["schemas"]["Pipeline"];
 export type PipelineSummary = components["schemas"]["PipelineSummary"];
 export type Problem = components["schemas"]["ProblemOut"];
+export type RunSummary = components["schemas"]["RunSummary"];
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly problems: Problem[] = []) {
@@ -32,6 +33,24 @@ function account(id: string) {
 }
 
 export const api = {
+  async runs(accountId: string) {
+    return checked(await client.GET("/api/v1/runs", { params: { header: account(accountId) } }));
+  },
+  async run(accountId: string, run_id: string) {
+    return checked(await client.GET("/api/v1/runs/{run_id}", {
+      params: { header: account(accountId), path: { run_id } },
+    }));
+  },
+  async runEvents(accountId: string, run_id: string) {
+    return checked(await client.GET("/api/v1/runs/{run_id}/events", {
+      params: { header: account(accountId), path: { run_id } },
+    }));
+  },
+  async launchRun(accountId: string, pipeline_id: string, body: components["schemas"]["LaunchRequest"]) {
+    return checked(await client.POST("/api/v1/pipelines/{pipeline_id}/runs", {
+      params: { header: account(accountId), path: { pipeline_id } }, body,
+    }));
+  },
   async blocks(accountId: string) {
     return checked(await client.GET("/api/v1/blocks", { params: { header: account(accountId) } }));
   },
