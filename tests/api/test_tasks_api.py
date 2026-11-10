@@ -8,7 +8,7 @@
 from typing import Any
 
 import pytest
-from api_fakes import launch, saved
+from api_fakes import launch_and_read, saved
 
 from backend.core.registry import BUILTIN_BLOCKS, load_registry
 
@@ -140,7 +140,7 @@ def test_block_sees_only_the_bank_of_the_runs_teacher(client, me, stranger):
     created(client, me, status="draft", answer=None)
     pipeline_id = saved(client, me, take_pipeline("source.fake_bank", {}))
 
-    run = launch(client, me, pipeline_id).json()
+    run = launch_and_read(client, me, pipeline_id).json()
 
     assert run["status"] == "done", run["error"]
     events = client.get(f"{API}/runs/{run['id']}/events", headers=me).json()
@@ -176,8 +176,8 @@ def test_tasks_are_created_and_chosen_by_topic_and_difficulty(client_of, me):
     config = {"topic": {"$param": "topic"}, "difficulty": {"$param": "difficulty"}}
     pipeline_id = saved(client, me, take_pipeline("source.task_bank", config))
 
-    run = launch(client, me, pipeline_id, topic="logarithms", difficulty=2).json()
-    empty = launch(client, me, pipeline_id, topic="integrals", difficulty=1).json()
+    run = launch_and_read(client, me, pipeline_id, topic="logarithms", difficulty=2).json()
+    empty = launch_and_read(client, me, pipeline_id, topic="integrals", difficulty=1).json()
 
     assert run["status"] == "done", run["error"]
     events = client.get(f"{API}/runs/{run['id']}/events", headers=me).json()

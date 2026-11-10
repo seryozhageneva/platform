@@ -3,7 +3,7 @@
 import copy
 import uuid
 
-from api_fakes import THREE_FAKES, chain, saved
+from api_fakes import THREE_FAKES, chain, launch_and_read, saved
 
 API = "/api/v1"
 
@@ -40,9 +40,10 @@ def test_new_version_is_saved_and_the_launch_takes_the_latest(client, me):
     assert (read["name"], read["latest_version"]) == ("Короче", 2)
     assert [node["id"] for node in read["graph"]["nodes"]] == ["start", "make", "keep"]
 
-    run = client.post(f"{API}/pipelines/{pipeline_id}/runs", headers=me).json()
+    run = launch_and_read(client, me, pipeline_id).json()
     assert run["pipeline_version"] == 2
     events = client.get(f"{API}/runs/{run['id']}/events", headers=me).json()
+    assert events[-1]["type"] == "run_done"
     assert "upper" not in [event["node_id"] for event in events]
 
 

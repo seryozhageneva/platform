@@ -19,17 +19,24 @@ from backend.api.errors import ApiError
 from backend.api.schemas import ErrorOut, ProblemOut
 from backend.core.contracts.base import explain
 from backend.triggers.assembly import Assembly, open_assembly
+from backend.triggers.queue import EnqueueLaunch, LaunchQueue, QueueSettings, open_queue_connection
 
 PREFIX = "/api/v1"
 
 
-def create_app(assembly: Assembly | None = None) -> FastAPI:
+def create_app(
+    assembly: Assembly | None = None, *, enqueue: EnqueueLaunch | None = None
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if assembly is not None:
             yield
             return
-        async with open_assembly() as opened:
+        async with (
+            open_assembly() as opened,
+            open_queue_connection(QueueSettings().connection_settings()) as redis,
+        ):
+            app.state.enqueue_launch = LaunchQueue(redis).enqueue
             app.state.assembly = opened
             yield
 
@@ -41,6 +48,7 @@ def create_app(assembly: Assembly | None = None) -> FastAPI:
         separate_input_output_schemas=False,
     )
     app.state.assembly = assembly
+    app.state.enqueue_launch = enqueue
 
     api = APIRouter(prefix=PREFIX, dependencies=[Depends(same_origin)])
     api.include_router(auth.router)

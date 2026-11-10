@@ -275,26 +275,65 @@ class Engine:
         # Второй старт с тем же идентификатором затёр бы состояние и заново вызвал блоки.
         if await self._store.load(run_id) is not None:
             raise ValueError(f"запуск «{run_id}» уже есть: его продолжают, а не начинают заново")
+        state = self.prepare(
+            pipeline,
+            run_id=run_id,
+            pipeline_id=pipeline_id,
+            pipeline_version=pipeline_version,
+            event=event,
+            params=params,
+            student_id=student_id,
+            teacher_id=teacher_id,
+        )
+        if not state.current:
+            state.status = RunStatus.DONE
+        await self._store.save(state)
+        return await self.execute_prepared(pipeline, state, event.trigger.value)
+
+    @staticmethod
+    def prepare(
+        pipeline: Pipeline,
+        *,
+        run_id: str,
+        pipeline_id: str,
+        pipeline_version: int,
+        event: Event,
+        params: Mapping[str, Any] | None = None,
+        student_id: str | None = None,
+        teacher_id: str | None = None,
+    ) -> RunState:
+        """Готовит состояние без записи в базу и без вызова блоков."""
         trigger = pipeline.trigger()
         first = _next(pipeline.transitions, trigger.id, None)
         state = RunState(
             run_id=run_id,
             pipeline_id=pipeline_id,
             pipeline_version=pipeline_version,
-            # Триггер, из которого никуда не ведёт переход, — запуск без единого шага.
-            status=RunStatus.RUNNING if first else RunStatus.DONE,
+            status=RunStatus.RUNNING,
             params=_fill_params(pipeline, params or {}),
             student_id=student_id,
             teacher_id=teacher_id,
             current=[first] if first else [],
         )
-        # Событие — выход триггера: блоки читают его по ссылке «узел_триггера.event».
         state.write(trigger.id, {"event": event.model_dump(mode="json")})
-        await self._store.save(state)
-        events = [BlockEvent(type="run_started", data={"trigger": event.trigger.value})]
-        if not first:
-            events.append(BlockEvent(type="run_done"))
-        await self._store.append_events(run_id, trigger.id, events)
+        return state
+
+    async def execute_prepared(
+        self, pipeline: Pipeline, state: RunState, trigger_type: str
+    ) -> RunState:
+        """Выполняет сохранённый запуск. Вызывающая сторона защищает от второго старта."""
+        trigger_id = pipeline.trigger().id
+        await self._store.append_events(
+            state.run_id,
+            trigger_id,
+            [BlockEvent(type="run_started", data={"trigger": trigger_type})],
+        )
+        if not state.current:
+            if state.status is not RunStatus.DONE:
+                state.status = RunStatus.DONE
+                await self._store.save(state)
+            await self._store.append_events(state.run_id, trigger_id, [BlockEvent(type="run_done")])
+            return state
         return await self._advance(pipeline, state)
 
     async def resume(self, pipeline: Pipeline, run_id: str) -> RunState:

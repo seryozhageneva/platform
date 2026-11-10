@@ -1,7 +1,10 @@
 """Ручная проверка API: пайплайн и журнал (задача 08), банк задач (задача 09), ответ на
 паузе (задача 10).
 
-Сначала в одном терминале поднимается сервер:  uv run python -m backend.api
+Сначала подними PostgreSQL и Redis: docker compose up -d --wait
+В двух терминалах подними API и рабочий процесс очереди:
+    uv run python -m backend.api
+    uv run arq backend.triggers.worker.WorkerSettings
 Один раз заведи demo.teacher@example.test командой backend.api.create_teacher.
 Затем в другом терминале запусти проверку:           uv run python -m experiments.api_check
 
@@ -15,6 +18,7 @@
 
 import sys
 from getpass import getpass
+from time import monotonic, sleep
 from typing import Any
 
 import httpx
@@ -109,6 +113,18 @@ def check(response: httpx.Response) -> Any:
     return response.json()
 
 
+def await_run(api: httpx.Client, run: dict[str, Any]) -> dict[str, Any]:
+    deadline = monotonic() + 30
+    while run["status"] == "running":
+        if monotonic() >= deadline:
+            raise SystemExit(f"Запуск {run['id']} не остановился за 30 секунд. Проверь worker.")
+        sleep(0.25)
+        run = check(api.get(f"/runs/{run['id']}"))
+    if run["status"] == "error":
+        raise SystemExit(f"Запуск {run['id']} остановился с ошибкой: {run['error']}")
+    return run
+
+
 def main() -> int:
     with httpx.Client(base_url=SERVER, headers={"Origin": "http://127.0.0.1:8000"}) as api:
         try:
@@ -127,7 +143,8 @@ def main() -> int:
         print(f"1. Пайплайн сохранён: {pipeline['id']}, версия {pipeline['version']}")
         run = check(api.post(f"/pipelines/{pipeline['id']}/runs"))
         print(f"2. Запуск создан запросом: {run['id']}, статус «{run['status']}»")
-        print("3. Журнал событий запуска:")
+        run = await_run(api, run)
+        print(f"3. Статус после фоновой работы: «{run['status']}». Журнал событий:")
         for event in check(api.get(f"/runs/{run['id']}/events")):
             print(f"   узел «{event['node_id']}»: {event['type']} {event['data'] or ''}")
         print("Готово: пайплайн запускается запросом, события видны в журнале.")
@@ -151,6 +168,7 @@ def check_bank(api: httpx.Client) -> None:
     pipeline = check(api.post("/pipelines", json=BANK_PIPELINE))
     params = {"topic": DEMO_TOPIC, "difficulty": 2}
     run = check(api.post(f"/pipelines/{pipeline['id']}/runs", json={"params": params}))
+    run = await_run(api, run)
     print(f"5. Запуск «взять задачу» с темой и сложностью 2: статус «{run['status']}»")
     events = check(api.get(f"/runs/{run['id']}/events"))
     chosen = [event["data"] for event in events if event["type"] == "task_chosen"]
@@ -166,6 +184,7 @@ def check_answer(api: httpx.Client) -> None:
         api.post(f"/pipelines/{pipeline['id']}/runs", json={"params": {"topic": DEMO_TOPIC}})
     )
     print(f"6. Урок из двух задач запущен: {run['id']}")
+    run = await_run(api, run)
     number = 0
     while run["status"] == "waiting":
         number += 1

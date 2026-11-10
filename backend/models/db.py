@@ -7,6 +7,7 @@
 
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -70,3 +71,8 @@ def make_engine(url: URL | None = None, **options: Any) -> AsyncEngine:
 def make_sessions(engine: AsyncEngine) -> Sessions:
     # Записи остаются читаемыми и после закрытия сессии: репозиторий возвращает их наружу.
     return async_sessionmaker(engine, expire_on_commit=False)
+
+
+def advisory_key(record_id: UUID) -> int:
+    """Ключ одной записи для транзакционной блокировки PostgreSQL."""
+    return int.from_bytes(record_id.bytes[:8], "big", signed=True)

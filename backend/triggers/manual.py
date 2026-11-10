@@ -19,6 +19,7 @@ from backend.core.contracts.state import RunState
 from backend.core.contracts.wiring import Problem
 from backend.core.validator import validate
 from backend.triggers.assembly import Assembly
+from backend.triggers.queue import EnqueueLaunch
 
 _TYPE_NAMES = {
     ParamType.STRING: "строка",
@@ -43,15 +44,13 @@ class LaunchRefused(Exception):
 async def start_manual(
     assembly: Assembly,
     *,
+    enqueue: EnqueueLaunch,
     teacher_id: uuid.UUID,
     pipeline_id: uuid.UUID,
     params: Mapping[str, Any] | None = None,
     expected_version: int | None = None,
 ) -> RunState:
-    """Запускает последнюю версию пайплайна преподавателя и выполняет её, пока она идёт сама.
-
-    Возвращает состояние запуска: он закончился, встал на паузу или остановился с ошибкой.
-    """
+    """Проверяет последнюю версию и принимает ручной запуск в очередь."""
     row = await assembly.pipelines.get(teacher_id, pipeline_id)
     if row is None:
         raise PipelineNotFound("пайплайн не найден")
@@ -75,7 +74,7 @@ async def start_manual(
     problems = launch_problems(assembly, pipeline, TriggerType.MANUAL, given)
     if problems:
         raise LaunchRefused("пайплайн нельзя запустить", problems)
-    return await assembly.engine().start(
+    state = assembly.engine().prepare(
         pipeline,
         run_id=str(uuid.uuid4()),
         pipeline_id=str(row.id),
@@ -84,6 +83,9 @@ async def start_manual(
         params=given,
         teacher_id=str(teacher_id),
     )
+    async with assembly.runs.queue_launch(state, pipeline.trigger().id):
+        await enqueue(uuid.UUID(state.run_id))
+    return state
 
 
 def launch_problems(
