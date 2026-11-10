@@ -10,19 +10,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.api.deps import REFUSALS, Assembled, Student, Teacher
 from backend.api.errors import ApiError
+from backend.api.schemas import ErrorOut
 from backend.core.contracts.ports import AnswerForm
 from backend.core.contracts.screens import AnswerFormData, AnswerFormResponse, ScreenType
 from backend.core.contracts.state import RunState, RunStatus
 from backend.core.engine import ResponseRejected
-from backend.models.assignments import LessonBusy
+from backend.models.assignments import LessonBusy, LessonLockUnavailable
 from backend.models.tables import AssignmentRow, Role
 from backend.triggers.assembly import Assembly
 from backend.triggers.manual import LaunchRefused, PipelineNotFound
 from backend.triggers.responses import NotWaiting, answer_run
-from backend.triggers.student import checked_lesson, open_lesson
+from backend.triggers.student import BROWSER_FORMS, checked_lesson, open_lesson
 
 router = APIRouter(tags=["Уроки"], responses=REFUSALS)
-_BROWSER_FORMS = {AnswerForm.TEXT, AnswerForm.FORMULA}
+_LOCK_REFUSAL = {503: {"model": ErrorOut, "description": "Сервер уроков занят"}}
 
 
 class AssignmentIn(BaseModel):
@@ -96,6 +97,8 @@ async def _locked_lesson(
             yield assignment
     except LessonBusy:
         raise ApiError(409, "урок уже обновляется") from None
+    except LessonLockUnavailable:
+        raise ApiError(503, "сервер уроков занят, попробуйте ещё раз") from None
 
 
 def _lesson_view(state: RunState, revision: str) -> LessonOut:
@@ -103,7 +106,7 @@ def _lesson_view(state: RunState, revision: str) -> LessonOut:
         waiting = state.waiting[0]
         if waiting.who == "student" and waiting.screen is ScreenType.ANSWER_FORM:
             data = AnswerFormData.model_validate(waiting.data)
-            forms = [form for form in data.forms if form in _BROWSER_FORMS]
+            forms = [form for form in data.forms if form in BROWSER_FORMS]
             if forms or data.can_ask_hint:
                 screen = LessonScreen(
                     task_id=data.task_id,
@@ -127,7 +130,11 @@ async def _saved_view(
     return _lesson_view(state, saved[1])
 
 
-@router.post("/student/lessons/{lesson_id}/open", summary="Открыть или продолжить урок")
+@router.post(
+    "/student/lessons/{lesson_id}/open",
+    summary="Открыть или продолжить урок",
+    responses=_LOCK_REFUSAL,
+)
 async def open_student_lesson(lesson_id: UUID, student: Student, assembly: Assembled) -> LessonOut:
     async with _locked_lesson(assembly, lesson_id, student.id) as assignment:
         run = await assembly.assignments.run_for(lesson_id, student.id)
@@ -140,7 +147,11 @@ async def open_student_lesson(lesson_id: UUID, student: Student, assembly: Assem
         return await _saved_view(assembly, lesson_id, student.id, state)
 
 
-@router.post("/student/lessons/{lesson_id}/responses", summary="Ответить или попросить подсказку")
+@router.post(
+    "/student/lessons/{lesson_id}/responses",
+    summary="Ответить или попросить подсказку",
+    responses=_LOCK_REFUSAL,
+)
 async def respond_to_lesson(
     lesson_id: UUID, body: LessonResponseIn, student: Student, assembly: Assembled
 ) -> LessonOut:
@@ -165,12 +176,17 @@ async def respond_to_lesson(
                 answer.task_id != screen.task_id
                 or answer.form not in screen.forms
                 or not (answer.text or "").strip()
+                or "\x00" in (answer.text or "")
                 or answer.file is not None
             ):
                 raise ApiError(422, "ответ не подходит к этой задаче")
         try:
             state = await answer_run(
-                assembly, state, body.node_id, response.model_dump(mode="json")
+                assembly,
+                state,
+                body.node_id,
+                response.model_dump(mode="json"),
+                assignment_id=lesson_id,
             )
         except NotWaiting as error:
             raise ApiError(409, str(error)) from None

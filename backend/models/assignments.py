@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, literal_column, select
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from backend.models.db import Sessions
 from backend.models.tables import AssignmentRow, PipelineRow, RunRow
@@ -15,9 +16,14 @@ class LessonBusy(Exception):
     """Запрос к этому уроку уже выполняется."""
 
 
+class LessonLockUnavailable(Exception):
+    """Нет свободного соединения для блокировки урока."""
+
+
 class AssignmentRepository:
-    def __init__(self, sessions: Sessions) -> None:
+    def __init__(self, sessions: Sessions, *, lock_sessions: Sessions | None = None) -> None:
         self._sessions = sessions
+        self._lock_sessions = lock_sessions or sessions
 
     async def create(
         self, teacher_id: UUID, student_id: UUID, pipeline_id: UUID, params: dict[str, Any]
@@ -66,7 +72,11 @@ class AssignmentRepository:
     async def lock(self, assignment_id: UUID) -> AsyncIterator[None]:
         # Отдельная транзакция держит блокировку до конца запроса, пока движок сохраняет шаги.
         key = int.from_bytes(assignment_id.bytes[:8], "big", signed=True)
-        async with self._sessions.begin() as session:
-            if not await session.scalar(select(func.pg_try_advisory_xact_lock(key))):
+        async with self._lock_sessions.begin() as session:
+            try:
+                acquired = await session.scalar(select(func.pg_try_advisory_xact_lock(key)))
+            except PoolTimeout:
+                raise LessonLockUnavailable from None
+            if not acquired:
                 raise LessonBusy
             yield

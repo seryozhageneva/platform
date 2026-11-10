@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from api_fakes import saved
@@ -15,7 +15,11 @@ from backend.core.contracts.state import RunStatus
 from backend.core.contracts.testing import FakeLLM
 from backend.core.engine import Engine
 from backend.core.registry import BUILTIN_BLOCKS, load_registry
-from backend.triggers.assembly import Assembly
+from backend.models.assignments import LessonLockUnavailable
+from backend.models.db import make_engine
+from backend.models.run_store import PgRunStore
+from backend.triggers.assembly import Assembly, open_assembly
+from backend.triggers.responses import answer_run
 from experiments.student_lesson_demo import HINT
 
 API = "/api/v1"
@@ -97,7 +101,12 @@ def test_assignment_requires_owned_student_and_runnable_pipeline(client, me, str
     foreign_pipeline = saved(client, stranger, graph)
     assert assign(client, me, pipeline_id, foreign_id, {"topic": "Дроби"}).status_code == 404
     assert assign(client, me, foreign_pipeline, student_id, {"topic": "Дроби"}).status_code == 404
-    for params in ({}, {"topic": "Дроби", "n_tasks": "один"}):
+    for params in (
+        {},
+        {"topic": "Дроби", "n_tasks": "один"},
+        {"topic": "Дроби", "difficulty": 0},
+        {"topic": "Дроби", "n_tasks": 0},
+    ):
         invalid = assign(client, me, pipeline_id, student_id, params)
         assert invalid.status_code == 422
         assert invalid.json()["problems"][0]["code"] == "bad_param"
@@ -152,6 +161,10 @@ def test_student_can_resume_ask_and_finish(client, me, assigned, assembly, teach
             "answer": {"task_id": current["task_id"], "form": "formula", "text": "2/4"},
         },
     )
+    answer["response"]["answer"]["text"] = "2/4\x00"
+    assert lesson_action(client, headers, lesson_id, "responses", answer).status_code == 422
+    assert lesson_action(client, headers, lesson_id, "open").json() == hinted.json()
+    answer["response"]["answer"]["text"] = "2/4"
     finished = lesson_action(client, headers, lesson_id, "responses", answer)
     assert finished.json() == {"status": "done", "screen": None}
     assert lesson_action(client, headers, lesson_id, "open").json() == finished.json()
@@ -232,3 +245,69 @@ def test_open_recovers_start_interrupted_after_first_save(client, assigned, asse
     after = asyncio.run(saved_run())
     assert after.run_id == before.run_id
     assert after.status is RunStatus.WAITING
+
+
+def test_lesson_rejects_unsupported_form_at_assignment_and_open(client, me, assigned):
+    student_id, headers, lesson_id, pipeline_id, graph, _ = assigned
+    form = next(node for node in graph["nodes"] if node["id"] == "show")
+    form["config"] = {"forms": ["photo"], "allow_hints": False}
+    updated = client.put(f"{API}/pipelines/{pipeline_id}", headers=me, json=graph)
+    assert updated.status_code == 200, updated.text
+    for rejected in (
+        assign(client, me, pipeline_id, student_id, {"topic": "Дроби"}),
+        lesson_action(client, headers, lesson_id, "open"),
+    ):
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["problems"][0]["code"] == "unsupported_screen"
+
+
+def test_lesson_lock_leaves_main_pool_available(test_db_url, migrated, monkeypatch):
+    def tiny_pool(url=None, **_options):
+        return make_engine(url or test_db_url, pool_size=1, max_overflow=0, pool_timeout=0.2)
+
+    monkeypatch.setattr("backend.triggers.assembly.make_engine", tiny_pool)
+
+    async def read_while_locked():
+        async with open_assembly(llm=FakeLLM()) as assembly:
+            lesson_id = uuid4()
+            async with assembly.assignments.lock(lesson_id):
+                assert await assembly.assignments.run_for(lesson_id, uuid4()) is None
+                with pytest.raises(LessonLockUnavailable):
+                    async with assembly.assignments.lock(uuid4()):
+                        pytest.fail("пул блокировок уже занят")
+
+    asyncio.run(read_while_locked())
+
+
+def test_interrupted_answer_leaves_no_duplicate_work(
+    client, assigned, assembly, teacher, monkeypatch
+):
+    student_id, headers, lesson_id, _, _, _ = assigned
+    opened = lesson_action(client, headers, lesson_id, "open").json()
+    screen = opened["screen"]
+    response = {
+        "action": "answer",
+        "answer": {"task_id": screen["task_id"], "form": "formula", "text": "2/4"},
+    }
+
+    async def interrupt(_store, _state):
+        raise asyncio.CancelledError
+
+    async def attempt():
+        run_id, _ = await assembly.assignments.run_for(UUID(lesson_id), UUID(student_id))
+        state = await assembly.runs.load(str(run_id))
+        with monkeypatch.context() as patch:
+            patch.setattr(PgRunStore, "save", interrupt)
+            with pytest.raises(asyncio.CancelledError):
+                await answer_run(
+                    assembly, state, screen["node_id"], response, assignment_id=UUID(lesson_id)
+                )
+        assert await assembly.submissions.for_run(teacher.id, run_id) == []
+        return run_id
+
+    run_id = asyncio.run(attempt())
+    assert lesson_action(client, headers, lesson_id, "open").json() == opened
+    finished = lesson_action(client, headers, lesson_id, "responses", on_screen(screen, response))
+    assert finished.json() == {"status": "done", "screen": None}
+    [submission] = asyncio.run(assembly.submissions.for_run(teacher.id, run_id))
+    assert submission.text == "2/4"

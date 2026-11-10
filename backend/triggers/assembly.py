@@ -8,7 +8,7 @@
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 from pydantic import ValidationError
@@ -36,11 +36,16 @@ logger = logging.getLogger(__name__)
 
 class Assembly:
     def __init__(
-        self, sessions: Sessions, registry: Registry, llm: LLMClient | None = None
+        self,
+        sessions: Sessions,
+        registry: Registry,
+        llm: LLMClient | None = None,
+        *,
+        lock_sessions: Sessions | None = None,
     ) -> None:
         self.registry = registry
         self._sessions = sessions
-        self.assignments = AssignmentRepository(sessions)
+        self.assignments = AssignmentRepository(sessions, lock_sessions=lock_sessions)
         self.users = UserRepository(sessions)
         self.auth = AuthRepository(sessions)
         self.pipelines = PipelineRepository(sessions)
@@ -52,12 +57,18 @@ class Assembly:
 
     def engine(self, *, assignment_id: uuid.UUID | None = None) -> Engine:
         """Движок с настоящим хранилищем. Он ничего не помнит, поэтому на каждый раз новый."""
-        store = self.runs
-        if assignment_id is not None:
-            store = PgRunStore(self._sessions, assignment_id=assignment_id)
-        return Engine(store, self._blocks, llm=self._llm)
+        if assignment_id is None:
+            return Engine(self.runs, self._blocks, llm=self._llm)
+        store = PgRunStore(self._sessions, assignment_id=assignment_id)
+        blocks = {
+            name: self._serviced(block, student_store=store)
+            for name, block in self.registry.blocks.items()
+        }
+        return Engine(store, blocks, llm=self._llm)
 
-    def _serviced(self, block: LoadedBlock) -> LoadedBlock:
+    def _serviced(
+        self, block: LoadedBlock, *, student_store: PgRunStore | None = None
+    ) -> LoadedBlock:
         """Тот же блок, но перед вызовом сборка кладёт в `context` службы этого запуска.
 
         Модель блок получает с пометкой своего запуска и узла (ADR 0013): движок выдаёт всем
@@ -85,13 +96,18 @@ class Assembly:
             if services:
                 context = context.model_copy(update=services)
             result = await block.run(inputs, config, context)
-            await record(block.manifest, context, result)
+            await record(block.manifest, context, result, student_store=student_store)
             return result
 
         return LoadedBlock(block.manifest, run)
 
     async def _record_answers(
-        self, manifest: Manifest, context: RunContext, result: Done | Waiting
+        self,
+        manifest: Manifest,
+        context: RunContext,
+        result: Done | Waiting,
+        *,
+        student_store: PgRunStore | None,
     ) -> None:
         """Записывает ответы ученика, которые принял блок, ждавший ученика (ADR 0016)."""
         accepted = (
@@ -110,38 +126,45 @@ class Assembly:
             except ValidationError:
                 # Такой выход движок не пропустит и остановит запуск — записывать нечего.
                 continue
+            owner_id = uuid.UUID(context.teacher_id)
+            run_id = uuid.UUID(context.run_id)
+            student_id = uuid.UUID(context.student_id) if context.student_id else None
+            if student_store is not None:
+                student_store.stage_submission(
+                    self.submissions.answer_row(
+                        owner_id,
+                        answer,
+                        run_id=run_id,
+                        node_id=context.node_id,
+                        student_id=student_id,
+                    )
+                )
+                continue
             try:
                 await self.submissions.add_answer(
-                    uuid.UUID(context.teacher_id),
-                    answer,
-                    run_id=uuid.UUID(context.run_id),
-                    node_id=context.node_id,
-                    student_id=None
-                    if context.student_id is None
-                    else uuid.UUID(context.student_id),
+                    owner_id, answer, run_id=run_id, node_id=context.node_id, student_id=student_id
                 )
             except Exception as error:
-                # Для движка это падение блока, и текст ошибки он пишет в состояние и журнал.
-                # Текст ошибки базы цитирует запрос вместе с ответом ученика, поэтому наружу
-                # уходит только вид ошибки — так же поступает движок с ошибками хранилища.
+                # Текст ошибки базы может содержать ответ ученика.
                 raise RuntimeError(
                     f"не удалось записать работу ученика ({type(error).__name__})"
                 ) from None
 
 
 @asynccontextmanager
-async def open_assembly() -> AsyncIterator[Assembly]:
-    """Сборка по настройкам из `.env`: рабочая база, встроенные блоки, выбранная модель."""
-    engine = make_engine()
-    try:
+async def open_assembly(*, llm: LLMClient | None = None) -> AsyncIterator[Assembly]:
+    """Сборка для сервера с отдельным пулом соединений для блокировок урока."""
+    async with AsyncExitStack() as resources:
+        engine = make_engine()
+        resources.push_async_callback(engine.dispose)
+        lock_engine = make_engine(engine.url, pool_size=5, max_overflow=0, pool_timeout=2)
+        resources.push_async_callback(lock_engine.dispose)
         sessions = make_sessions(engine)
-        llm = make_llm(call_log=LLMCallRepository(sessions))
-        try:
-            registry = load_registry(BUILTIN_BLOCKS)
-            for problem in registry.problems:
-                logger.warning("блок не загружен: %s", problem)
-            yield Assembly(sessions, registry, llm)
-        finally:
-            await llm.aclose()
-    finally:
-        await engine.dispose()
+        if llm is None:
+            platform_llm = make_llm(call_log=LLMCallRepository(sessions))
+            resources.push_async_callback(platform_llm.aclose)
+            llm = platform_llm
+        registry = load_registry(BUILTIN_BLOCKS)
+        for problem in registry.problems:
+            logger.warning("блок не загружен: %s", problem)
+        yield Assembly(sessions, registry, llm, lock_sessions=make_sessions(lock_engine))

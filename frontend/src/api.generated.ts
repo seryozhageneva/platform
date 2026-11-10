@@ -2087,6 +2087,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
+            /** @description Сервер уроков занят */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
         };
     };
     respond_to_lesson_api_v1_student_lessons__lesson_id__responses_post: {
@@ -2153,6 +2162,15 @@ export interface operations {
             };
             /** @description Запрос не принят: причины — в `problems` */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сервер уроков занят */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
