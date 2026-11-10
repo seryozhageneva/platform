@@ -23,6 +23,7 @@ TABLES = {
     "llm_calls",
     "submissions",
     "login_sessions",
+    "files",
 }
 
 

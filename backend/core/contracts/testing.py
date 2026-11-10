@@ -3,7 +3,7 @@
 Блок не видит ни слой моделей `backend/llm/`, ни базу, поэтому подделки лежат рядом с
 контрактом: подключить их может и тест ядра, и тест любого блока. Фейковая модель ничего не
 отправляет в сеть — отвечает тем, что заранее написал автор теста, и запоминает, о чём её
-спросили. Подделка хранилища держит задачи в памяти.
+спросили. Подделка хранилища держит задачи и файлы в памяти.
 
 Это вспомогательный файл: моделей контракта он не меняет.
 """
@@ -20,7 +20,7 @@ from referencing import Registry
 from referencing.exceptions import Unresolvable
 
 from backend.core.contracts.interfaces import LLMMessage, LLMResponse
-from backend.core.contracts.ports import Task
+from backend.core.contracts.ports import FileRef, Task
 
 # Ответ, заданный в тесте: текст, данные для ответа по схеме или ошибка, с которой модель «упадёт».
 FakeReply = str | dict[str, Any] | list[Any] | Exception
@@ -120,15 +120,19 @@ def _by_schema(reply: str | dict[str, Any] | list[Any], schema: dict[str, Any]) 
 
 
 class FakeStore:
-    """Подделка с интерфейсом `PlatformStore`: банк задач одного преподавателя в памяти.
+    """Подделка с интерфейсом `PlatformStore`: банк задач и файлы одного преподавателя в памяти.
 
     Тест кладёт сюда задачи, которые в платформе были бы подтверждёнными задачами
     преподавателя этого запуска. Ищет так же, как настоящее хранилище: по совпадению условий,
-    в том порядке, в каком задачи переданы.
+    в том порядке, в каком задачи переданы. Файлы передаются парами «описание — содержимое»
+    и находятся по номеру из описания (ADR 0023).
     """
 
-    def __init__(self, tasks: Iterable[Task] = ()) -> None:
+    def __init__(
+        self, tasks: Iterable[Task] = (), files: Iterable[tuple[FileRef, bytes]] = ()
+    ) -> None:
         self.tasks = list(tasks)
+        self.files = {ref.id: (ref, content) for ref, content in files}
 
     async def find_tasks(
         self,
@@ -147,3 +151,11 @@ class FakeStore:
 
     async def get_task(self, task_id: str) -> Task | None:
         return next((task for task in self.tasks if task.id == task_id), None)
+
+    async def get_file(self, file_id: str) -> FileRef | None:
+        found = self.files.get(file_id)
+        return None if found is None else found[0]
+
+    async def read_file(self, file_id: str) -> bytes | None:
+        found = self.files.get(file_id)
+        return None if found is None else found[1]
