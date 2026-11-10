@@ -122,7 +122,8 @@ it("при потере ответа обновляет список, сохра
   fireEvent.click(button);
 
   expect((await screen.findByRole("alert")).textContent).toContain("Запуск мог состояться");
-  expect(api.runs).toHaveBeenCalledTimes(2);
+  // Список перезапрашивается эффектом после показа предупреждения — ждём, а не проверяем мгновенно.
+  await vi.waitFor(() => expect(api.runs).toHaveBeenCalledTimes(2));
   expect(topic.value).toBe("Дроби");
   expect(button.disabled).toBe(true);
   fireEvent.submit(button.form!);
