@@ -62,3 +62,17 @@ async def current_teacher(
 
 
 Teacher = Annotated[UserRow, Depends(current_teacher)]
+
+
+async def current_student(
+    user: CurrentUser,
+    expected_account: Annotated[UUID, Header(alias="X-Expected-Account")],
+) -> UserRow:
+    if user.role != Role.STUDENT:
+        raise ApiError(403, "нужна учётная запись ученика")
+    if user.id != expected_account:
+        raise ApiError(409, "учётная запись сменилась, обновите кабинет")
+    return user
+
+
+Student = Annotated[UserRow, Depends(current_student)]

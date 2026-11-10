@@ -29,8 +29,9 @@ _COLUMNS = {
 
 
 class PgRunStore:
-    def __init__(self, sessions: Sessions) -> None:
+    def __init__(self, sessions: Sessions, *, assignment_id: uuid.UUID | None = None) -> None:
         self._sessions = sessions
+        self._assignment_id = assignment_id
 
     async def load(self, run_id: str) -> RunState | None:
         key = _uuid_or_none(run_id)
@@ -67,6 +68,7 @@ class PgRunStore:
         }
         query = insert(RunRow).values(
             id=_uuid(state.run_id, "run_id"),
+            assignment_id=self._assignment_id,
             pipeline_id=_uuid(state.pipeline_id, "pipeline_id"),
             pipeline_version=state.pipeline_version,
             student_id=_uuid(state.student_id, "student_id"),

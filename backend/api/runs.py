@@ -1,8 +1,8 @@
 """Эндпоинты запусков: запустить вручную, ответить на паузе, посмотреть состояние и журнал.
 
 Запрос на запуск и ответ отвечают, когда запуск закончился, встал на паузу или остановился
-с ошибкой: движок выполняется прямо в запросе (ADR 0013). Пока у ученика нет кабинета
-(задачи 13 и 14), на паузе своего запуска отвечает преподаватель (ADR 0016).
+с ошибкой: движок выполняется прямо в запросе (ADR 0013). Преподаватель отвечает
+на паузе ручного запуска (ADR 0016).
 """
 
 import uuid
@@ -70,6 +70,8 @@ async def respond(
     run_id: uuid.UUID, body: ResponseIn, teacher: Teacher, assembly: Assembled
 ) -> RunOut:
     state = await _own_run(assembly, teacher, run_id)
+    if await assembly.assignments.is_assigned(run_id):
+        raise ApiError(403, "на назначенный урок отвечает ученик")
     try:
         state = await answer_run(assembly, state, body.node_id, body.response)
     except NotWaiting as error:

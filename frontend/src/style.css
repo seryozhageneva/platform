@@ -17,3 +17,8 @@ button:disabled { opacity: .55; cursor: default; }
 .students { padding: 0; list-style: none; }
 .students li { display: grid; gap: .45rem; border-top: 1px solid #cbd5e1; padding-block: .75rem; }
 .actions { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
+
+.lesson-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

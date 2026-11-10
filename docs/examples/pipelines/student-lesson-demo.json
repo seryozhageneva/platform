@@ -1,0 +1,154 @@
+{
+  "format": 1,
+  "id": "student_lesson_demo",
+  "name": "Тренировка с формулами",
+  "description": "Локальный пример урока с короткими математическими ответами.",
+  "params": [
+    {
+      "name": "topic",
+      "title": "Тема",
+      "type": "string"
+    },
+    {
+      "name": "difficulty",
+      "title": "Стартовая сложность",
+      "type": "integer",
+      "default": 1
+    },
+    {
+      "name": "n_tasks",
+      "title": "Число задач в уроке",
+      "type": "integer",
+      "default": 1
+    },
+    {
+      "name": "max_hints",
+      "title": "Подсказок на одну задачу",
+      "type": "integer",
+      "default": 3
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "title": "Ученик открыл урок",
+      "launches": [
+        {
+          "type": "student"
+        }
+      ]
+    },
+    {
+      "id": "take_task",
+      "type": "block",
+      "block": "source.task_bank",
+      "title": "Взять задачу",
+      "config": {
+        "topic": {
+          "$param": "topic"
+        },
+        "difficulty": {
+          "$param": "difficulty"
+        },
+        "adapt": true
+      },
+      "inputs": {
+        "previous": "take_task.task",
+        "verdict": "check_exact.verdict"
+      },
+      "limit": {
+        "max": {
+          "$param": "n_tasks"
+        }
+      }
+    },
+    {
+      "id": "show",
+      "type": "block",
+      "block": "student.show_task",
+      "title": "Показать задачу и принять ответ",
+      "config": {
+        "forms": [
+          "text",
+          "formula"
+        ],
+        "allow_hints": true
+      },
+      "inputs": {
+        "task": "take_task.task",
+        "hint": "tutor.hint"
+      }
+    },
+    {
+      "id": "check_exact",
+      "type": "block",
+      "block": "check.exact",
+      "title": "Проверить по эталону",
+      "inputs": {
+        "task": "take_task.task",
+        "answer": "show.answer"
+      }
+    },
+    {
+      "id": "tutor",
+      "type": "block",
+      "block": "student.tutor",
+      "title": "Дать подсказку",
+      "inputs": {
+        "task": "take_task.task",
+        "answer": "show.answer",
+        "verdict": "check_exact.verdict",
+        "previous_hint": "tutor.hint"
+      },
+      "limit": {
+        "max": {
+          "$param": "max_hints"
+        },
+        "otherwise": "take_task",
+        "reset_on": "take_task"
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": "start",
+      "to": "take_task"
+    },
+    {
+      "from": "take_task",
+      "when": "ok",
+      "to": "show"
+    },
+    {
+      "from": "show",
+      "when": "hint_requested",
+      "to": "tutor"
+    },
+    {
+      "from": "check_exact",
+      "when": "correct",
+      "to": "take_task"
+    },
+    {
+      "from": "check_exact",
+      "when": "wrong",
+      "to": "tutor"
+    },
+    {
+      "from": "tutor",
+      "when": "hint",
+      "to": "show"
+    },
+    {
+      "from": "tutor",
+      "when": "give_up",
+      "to": "take_task"
+    },
+    {
+      "from": "show",
+      "when": "answer",
+      "to": "check_exact"
+    }
+  ]
+}

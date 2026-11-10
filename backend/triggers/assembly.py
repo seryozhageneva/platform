@@ -20,6 +20,7 @@ from backend.core.contracts.run import Done, RunContext, Waiting
 from backend.core.engine import Engine, LoadedBlock
 from backend.core.registry import BUILTIN_BLOCKS, Registry, load_registry
 from backend.llm.factory import make_llm
+from backend.models.assignments import AssignmentRepository
 from backend.models.auth import AuthRepository
 from backend.models.db import Sessions, make_engine, make_sessions
 from backend.models.llm_calls import LLMCallRepository
@@ -38,6 +39,8 @@ class Assembly:
         self, sessions: Sessions, registry: Registry, llm: LLMClient | None = None
     ) -> None:
         self.registry = registry
+        self._sessions = sessions
+        self.assignments = AssignmentRepository(sessions)
         self.users = UserRepository(sessions)
         self.auth = AuthRepository(sessions)
         self.pipelines = PipelineRepository(sessions)
@@ -47,9 +50,12 @@ class Assembly:
         self._llm = llm
         self._blocks = {name: self._serviced(block) for name, block in registry.blocks.items()}
 
-    def engine(self) -> Engine:
+    def engine(self, *, assignment_id: uuid.UUID | None = None) -> Engine:
         """Движок с настоящим хранилищем. Он ничего не помнит, поэтому на каждый раз новый."""
-        return Engine(self.runs, self._blocks, llm=self._llm)
+        store = self.runs
+        if assignment_id is not None:
+            store = PgRunStore(self._sessions, assignment_id=assignment_id)
+        return Engine(store, self._blocks, llm=self._llm)
 
     def _serviced(self, block: LoadedBlock) -> LoadedBlock:
         """Тот же блок, но перед вызовом сборка кладёт в `context` службы этого запуска.
