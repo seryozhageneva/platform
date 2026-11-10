@@ -889,6 +889,8 @@ export interface components {
          * @description Ответ человека запуску на паузе: на каком узле и что он ввёл на экране.
          */
         ResponseIn: {
+            /** Approval Id */
+            approval_id?: string | null;
             /** Node Id */
             node_id: string;
             /** Response */
@@ -1178,6 +1180,8 @@ export interface components {
         };
         /** WaitingOut */
         WaitingOut: {
+            /** Approval Id */
+            approval_id?: string | null;
             /** Data */
             data: {
                 [key: string]: unknown;
@@ -2234,7 +2238,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
-            /** @description Запуск не ждёт ответа на этом узле */
+            /** @description Пауза изменилась или запуск уже обновляется */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2245,6 +2249,15 @@ export interface operations {
             };
             /** @description Запрос не принят: причины — в `problems` */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сервер запусков занят */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

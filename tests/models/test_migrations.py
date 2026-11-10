@@ -10,6 +10,7 @@ from sqlalchemy.pool import NullPool
 from backend.models.db import make_engine
 
 TABLES = {
+    "approvals",
     "users",
     "groups",
     "group_members",

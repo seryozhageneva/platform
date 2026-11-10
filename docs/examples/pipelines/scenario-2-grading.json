@@ -115,6 +115,7 @@
       "type": "block",
       "block": "approval.review_table",
       "title": "Преподаватель подтверждает оценки",
+      "config": {"editable_fields": "comment"},
       "inputs": {"items": "each_work.results"}
     },
     {

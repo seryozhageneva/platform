@@ -55,3 +55,19 @@ main:has(.pipeline-workspace) { width: min(100rem, calc(100% - 2rem)); }
 
 .teacher-runs section { margin-block: 1rem; }
 .teacher-runs li { margin-block: 0.35rem; }
+
+form[aria-label="Таблица подтверждения"] { max-width: none; }
+form[aria-label="Таблица подтверждения"] fieldset { min-width: 0; }
+.approval-scroll { overflow-x: auto; }
+.approval-scroll table { border-collapse: collapse; width: 100%; }
+.approval-scroll th, .approval-scroll td {
+  border-bottom: 1px solid #cbd5e1;
+  padding: 0.5rem;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.approval-scroll textarea { box-sizing: border-box; font: inherit; min-width: 10rem; width: 100%; }
+.approval-scroll label { display: flex; align-items: center; }
+.approval-scroll input[type="checkbox"] { width: auto; }

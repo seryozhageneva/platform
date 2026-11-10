@@ -12,6 +12,7 @@ from backend.core.contracts.run import BlockEvent, Done, Waiting
 from backend.core.contracts.screens import ScreenType
 from backend.core.contracts.state import RunStatus, WaitingFor
 from backend.core.engine import ResponseRejected
+from backend.core.registry import BUILTIN_BLOCKS, load_registry
 
 QUESTION = {"task_id": "t1", "statement": "Вычислите $2^3$.", "forms": ["text"]}
 ASK = {"id": "ask", "type": "block", "block": "student.fake_ask", "inputs": {"text": "make.text"}}
@@ -63,13 +64,17 @@ def test_run_pauses_and_is_saved(go, lesson, called):
 
 
 def test_approval_block_waits_for_the_teacher(go, graph, add_block):
-    table = {"columns": [{"key": "text", "title": "Текст"}], "rows": [{"text": "а"}]}
+    table = {
+        "columns": [{"key": "score", "title": "Оценка", "editable": True}],
+        "rows": [{"score": 1}, {"score": 2}],
+    }
 
     async def review(inputs, config, context):
         if context.human_response is None:
             return Waiting(
                 screen=ScreenType.REVIEW_TABLE, data=table, events=[BlockEvent(type="table_built")]
             )
+        assert context.human_response == response
         return Done(outcome="approved")
 
     add_block(
@@ -88,8 +93,143 @@ def test_approval_block_waits_for_the_teacher(go, graph, add_block):
     # События блока, который встал на паузу, тоже попадают в журнал.
     assert [kind for _, kind, _ in go.store.journal[-2:]] == ["table_built", "node_waiting"]
 
-    done = go.respond(pipeline, "review", {"rows": [{"index": 0, "keep": True}]})
+    # У стороннего блока своя политика: число и ответ только по одной строке допустимы.
+    response = {"rows": [{"index": 0, "values": {"score": 3}}]}
+    done = go.respond(pipeline, "review", response)
     assert done.status is RunStatus.DONE and done.waiting == []
+
+
+def test_approval_cannot_corrupt_typed_task_inside_collected_record(go, graph, add_block):
+    registry = load_registry(BUILTIN_BLOCKS)
+    go.blocks["approval.review_table"] = registry.blocks["approval.review_table"]
+
+    async def make_tasks(inputs, config, context):
+        return Done(
+            outputs={
+                "items": [
+                    {
+                        "id": "task",
+                        "subject": "math",
+                        "topic": "demo",
+                        "difficulty": 1,
+                        "statement": "Условие",
+                        "check_method": "short_answer",
+                    }
+                ]
+            }
+        )
+
+    add_block(
+        "source.test_tasks",
+        make_tasks,
+        outputs=[{"name": "items", "title": "Задачи", "type": "Task", "list": True}],
+    )
+    pipeline = graph(
+        [
+            {"id": "make", "type": "block", "block": "source.test_tasks"},
+            {
+                "id": "each",
+                "type": "for_each",
+                "over": "make.items",
+                "body": {
+                    "start": "note",
+                    "nodes": [
+                        {
+                            "id": "note",
+                            "type": "block",
+                            "block": "source.fake_text",
+                            "config": {"text": "демо"},
+                        },
+                    ],
+                    "transitions": [],
+                },
+                "collect": {"task": "each.item"},
+                "as": "review_task",
+            },
+            {
+                "id": "review",
+                "type": "block",
+                "block": "approval.review_table",
+                "inputs": {"items": "each.results"},
+                "config": {"editable_fields": "task.check_method, task.statement"},
+            },
+        ],
+        [("make", None, "each"), ("each", "ok", "review")],
+    )
+    waiting = go.start(pipeline)
+    assert waiting.status is RunStatus.WAITING
+    with pytest.raises(ResponseRejected, match="не соответствуют типу"):
+        go.respond(
+            pipeline,
+            "review",
+            {
+                "rows": [
+                    {"index": 0, "values": {"/task/check_method": "несуществующий"}},
+                ]
+            },
+        )
+    assert asyncio.run(go.store.load(waiting.run_id)) == waiting
+    done = go.respond(
+        pipeline,
+        "review",
+        {
+            "rows": [
+                {"index": 0, "values": {"/task/statement": "Исправлено"}},
+            ]
+        },
+    )
+    [row] = done.ports["review"]["approved"]
+    assert row["task"]["statement"] == "Исправлено"
+
+
+def test_approval_can_skip_rows_when_schema_for_unchanged_values_is_unavailable(
+    go, graph, add_block
+):
+    registry = load_registry(BUILTIN_BLOCKS)
+    go.blocks["approval.review_table"] = registry.blocks["approval.review_table"]
+
+    async def make_rows(inputs, config, context):
+        return Done(outputs={"items": [{"text": "Сохранить"}, {"text": "Пропустить"}]})
+
+    async def receive(inputs, config, context):
+        return Done()
+
+    port = {"name": "items", "title": "Записи", "type": "Data", "of": "legacy", "list": True}
+    add_block("source.test_rows", make_rows, outputs=[port])
+    add_block(
+        "sink.test_rows",
+        receive,
+        inputs=[
+            {
+                **port,
+                "schema": {
+                    "$ref": "https://example.invalid/legacy.json",
+                },
+            }
+        ],
+    )
+    pipeline = graph(
+        [
+            {"id": "make", "type": "block", "block": "source.test_rows"},
+            {
+                "id": "review",
+                "type": "block",
+                "block": "approval.review_table",
+                "inputs": {"items": "make.items"},
+            },
+            {
+                "id": "receive",
+                "type": "block",
+                "block": "sink.test_rows",
+                "inputs": {"items": "review.approved"},
+            },
+        ],
+        [("make", None, "review"), ("review", "approved", "receive")],
+    )
+    assert go.start(pipeline).status is RunStatus.WAITING
+    done = go.respond(pipeline, "review", {"rows": [{"index": 0}, {"index": 1, "keep": False}]})
+    assert done.status is RunStatus.DONE
+    assert done.ports["review"]["approved"] == [{"text": "Сохранить"}]
 
 
 def test_response_goes_to_the_same_block_and_the_run_continues(go, lesson, calls, answer_with):

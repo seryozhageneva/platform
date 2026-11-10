@@ -50,7 +50,7 @@ def _browser_problems(assembly: Assembly, graph: Pipeline, params: dict[str, Any
         config = with_params(node.config, values)
         errors = config_problems(config, manifest.config, {})
         problems.extend(Problem(node.id, "bad_param", error) for error in errors)
-        if manifest.screen not in (None, ScreenType.ANSWER_FORM):
+        if manifest.screen not in (None, ScreenType.ANSWER_FORM, ScreenType.REVIEW_TABLE):
             problems.append(
                 Problem(node.id, "unsupported_screen", "этот экран недоступен в кабинете ученика")
             )

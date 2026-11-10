@@ -187,3 +187,85 @@ it("не предлагает запускать пайплайн, рассчи�
   await screen.findByText("Этот пайплайн нельзя запустить вручную.");
   expect(screen.queryByRole("button", { name: "Запустить" })).toBeNull();
 });
+
+it("сохраняет правку при ошибке и обновляет очередь и журнал после решения", async () => {
+  const approval = summary("review", "Материалы", {
+    status: "waiting", current: ["review"], waiting: [{ node_id: "review", who: "teacher" }],
+  });
+  const paused: Awaited<ReturnType<typeof api.run>> = {
+    ...result, id: "review", error: null, status: "waiting", current: ["review"],
+    waiting: [{
+      node_id: "review", who: "teacher", screen: "review_table", approval_id: "pause",
+      data: {
+        columns: [{ key: "/id", title: "Код" }, { key: "/comment", title: "Комментарий", editable: true }],
+        rows: [{ "/id": "A", "/comment": "Черновик" }, { "/id": "B", "/comment": "Пропустить" }],
+      },
+    }],
+  };
+  const finished = { ...paused, status: "done" as const, current: [], waiting: [] };
+  vi.mocked(api.runs).mockResolvedValueOnce([approval])
+    .mockResolvedValueOnce([{ ...approval, status: "done", waiting: [] }]);
+  vi.mocked(api.run).mockResolvedValueOnce(paused).mockResolvedValueOnce(finished);
+  vi.mocked(api.runEvents).mockResolvedValueOnce([]).mockResolvedValueOnce([{
+    id: 3, node_id: "review", type: "approval_decided", created_at: time,
+    data: { outcome: "approved", kept: 1, changed: 1, skipped: 1 },
+  }]);
+  const respond = vi.spyOn(api, "respondToRun")
+    .mockRejectedValueOnce(new ApiError(422, "Проверьте правки."))
+    .mockResolvedValueOnce(finished);
+
+  render(<TeacherRuns {...session} />);
+  const queue = within(await screen.findByRole("region", { name: "Очередь подтверждений" }));
+  fireEvent.click(await queue.findByRole("button", { name: "Материалы" }));
+  const journal = within(screen.getByRole("region", { name: "Журнал запуска" }));
+  const form = within(await journal.findByRole("form", { name: "Таблица подтверждения" }));
+  const field = form.getByRole<HTMLTextAreaElement>("textbox", { name: "Комментарий, строка 1" });
+  fireEvent.change(field, { target: { value: "Исправлено" } });
+  fireEvent.click(form.getByRole("checkbox", { name: "Пропустить строку 2" }));
+  expect(form.getByText("Строк пойдёт дальше: 1 из 2.")).toBeTruthy();
+
+  const submit = form.getByRole<HTMLButtonElement>("button", { name: "Подтвердить" });
+  fireEvent.click(submit);
+  expect(submit.matches(":disabled")).toBe(true);
+  fireEvent.submit(submit.form!);
+  expect(respond).toHaveBeenCalledTimes(1);
+  await form.findByText("Проверьте правки.");
+  expect(field.value).toBe("Исправлено");
+
+  fireEvent.click(submit);
+  expect(respond).toHaveBeenLastCalledWith("teacher", "review", {
+    node_id: "review", approval_id: "pause",
+    response: { rows: [
+      { index: 0, keep: true, values: { "/comment": "Исправлено" } },
+      { index: 1, keep: false, values: {} },
+    ] },
+  });
+  await queue.findByText("Нет запусков на подтверждении.");
+  await journal.findByText(/Оставлено 1, исправлено 1, пропущено 1/);
+  expect(journal.queryByRole("form", { name: "Таблица подтверждения" })).toBeNull();
+});
+
+it("показывает ошибку запуска после отправки решения без сообщения об успехе", async () => {
+  const approval = summary("review", "Материалы", {
+    status: "waiting", waiting: [{ node_id: "review", who: "teacher" }],
+  });
+  const paused: Awaited<ReturnType<typeof api.run>> = {
+    ...result, id: "review", error: null, status: "waiting", waiting: [{
+      node_id: "review", who: "teacher", screen: "review_table", approval_id: "pause",
+      data: { columns: [{ key: "/text", title: "Текст" }], rows: [{ "/text": "Строка" }] },
+    }],
+  };
+  const failed = { ...result, id: "review" };
+  vi.mocked(api.runs).mockResolvedValueOnce([approval]);
+  vi.mocked(api.run).mockResolvedValueOnce(paused).mockResolvedValueOnce(failed);
+  vi.spyOn(api, "respondToRun").mockResolvedValue(failed);
+
+  render(<TeacherRuns {...session} />);
+  const queue = within(await screen.findByRole("region", { name: "Очередь подтверждений" }));
+  fireEvent.click(queue.getByRole("button", { name: "Материалы" }));
+  const journal = within(screen.getByRole("region", { name: "Журнал запуска" }));
+  fireEvent.click(await journal.findByRole("button", { name: "Подтвердить" }));
+  await journal.findByText("Запуск остановился с ошибкой. Подробности в журнале.");
+  await journal.findByText("Ошибка блока");
+  expect(journal.queryByText("Решение принято.")).toBeNull();
+});

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { ApprovalTable, reviewTable } from "./ApprovalTable";
 import { api, ApiError, errorMessage } from "./api";
 import type { Pipeline, PipelineSummary, Problem, RunSummary } from "./api";
 
@@ -25,6 +26,7 @@ const eventLabels: Record<string, string> = {
   node_done: "Шаг завершён",
   node_waiting: "Шаг ждёт ответа",
   node_resumed: "Шаг продолжен",
+  approval_decided: "Решение преподавателя",
   node_failed: "Ошибка на шаге",
   run_done: "Запуск завершён",
 };
@@ -46,8 +48,11 @@ function RunProgress({ run }: { run: Pick<Run, "status" | "current" | "waiting" 
   </>;
 }
 
-function RunJournal({ accountId, onSessionChange, id, revision }: Session & { id: string; revision: number }) {
+function RunJournal({ accountId, onSessionChange, id, revision, onRefresh }: Session & {
+  id: string; revision: number; onRefresh: () => void;
+}) {
   const [journal, setJournal] = useState<{ run: Run; events: Events }>();
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -68,14 +73,27 @@ function RunJournal({ accountId, onSessionChange, id, revision }: Session & { id
     return () => { active = false; };
   }, [accountId, id, revision, onSessionChange]);
 
+  const waiting = journal?.run.status === "waiting" && journal.run.waiting.find((item) =>
+    item.who === "teacher" && item.screen === "review_table" && item.approval_id);
+  const table = waiting && reviewTable(waiting.data);
+
   return <section aria-label="Журнал запуска">
     <h3>Журнал запуска</h3>
+    {notice && <p role="status">{notice}</p>}
     {error ? <p role="alert">{error}</p> : !journal ? <p role="status">Загрузка журнала…</p> : <>
       <RunProgress run={journal.run} />
+      {waiting && waiting.approval_id && table && <ApprovalTable
+        key={waiting.approval_id} table={table} accountId={accountId} runId={id}
+        approvalId={waiting.approval_id} nodeId={waiting.node_id} onSessionChange={onSessionChange}
+        onRefresh={(message) => { setNotice(message); onRefresh(); }} />}
       {journal.events.length === 0 ? <p>Событий пока нет.</p> : <ol>
         {journal.events.map((event) => <li key={event.id}>
           <time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString("ru-RU")}</time>
           {" · "}{event.node_id}{" · "}{Object.hasOwn(eventLabels, event.type) ? eventLabels[event.type] : event.type}
+          {event.type === "approval_decided" && typeof event.data.kept === "number" &&
+            typeof event.data.changed === "number" && typeof event.data.skipped === "number" &&
+            <> · {event.data.outcome === "approved" ? "подтверждено" : "отклонено"}.
+              Оставлено {event.data.kept}, исправлено {event.data.changed}, пропущено {event.data.skipped}.</>}
         </li>)}
       </ol>}
     </>}
@@ -307,7 +325,7 @@ export function TeacherRuns({ accountId, onSessionChange, pipelineRevision = 0 }
     {selected && <div>
       {selectedRun && <p>{selectedRun.pipeline_name} · версия {selectedRun.pipeline_version}</p>}
       <RunJournal key={selected} accountId={accountId} onSessionChange={onSessionChange}
-        id={selected} revision={revision} />
+        id={selected} revision={revision} onRefresh={refresh} />
     </div>}
   </section>;
 }

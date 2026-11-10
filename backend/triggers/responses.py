@@ -23,6 +23,7 @@ async def answer_run(
     response: Mapping[str, Any],
     *,
     assignment_id: uuid.UUID | None = None,
+    approval: tuple[uuid.UUID, str, dict[str, Any]] | None = None,
 ) -> RunState:
     """Передаёт ответ узлу, на котором стоит запуск, и выполняет запуск дальше.
 
@@ -38,6 +39,5 @@ async def answer_run(
     pipeline = await assembly.pipelines.load(uuid.UUID(state.pipeline_id), state.pipeline_version)
     if pipeline is None:
         raise LookupError(f"версии {state.pipeline_version} пайплайна запуска нет в базе")
-    return await assembly.engine(assignment_id=assignment_id).respond(
-        pipeline, state.run_id, node_id, response
-    )
+    engine = assembly.engine(assignment_id=assignment_id, approval=approval)
+    return await engine.respond(pipeline, state.run_id, node_id, response)

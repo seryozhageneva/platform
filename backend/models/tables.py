@@ -265,6 +265,37 @@ class RunRow(Base):
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 
+class ApprovalRow(Base):
+    """Снимок одной паузы и решение преподавателя по нему."""
+
+    __tablename__ = "approvals"
+    __table_args__ = (
+        Index("ix_approvals_run_id", "run_id"),
+        Index(
+            "uq_approvals_open_run",
+            "run_id",
+            unique=True,
+            postgresql_where=text("answered_at IS NULL"),
+        ),
+        CheckConstraint(
+            "(answered_at IS NULL AND outcome IS NULL AND response IS NULL) OR "
+            "(answered_at IS NOT NULL AND outcome IS NOT NULL "
+            "AND outcome IN ('approved', 'rejected') AND response IS NOT NULL)",
+            name="decision",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    node_id: Mapped[str]
+    teacher_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    snapshot: Mapped[dict[str, Any]]
+    opened_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    outcome: Mapped[str | None]
+    response: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    answered_at: Mapped[datetime | None]
+
+
 class EventRow(Base):
     """Запись журнала событий. Номер растёт сам, поэтому порядок событий не теряется."""
 
