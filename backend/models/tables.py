@@ -1,6 +1,6 @@
 """Таблицы базы данных (ADR 0007).
 
-Одиннадцать таблиц: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
+Таблицы: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
 запуски, журнал событий, журнал вызовов модели (ADR 0012) и работы учеников (ADR 0016).
 Остальные сущности из
 docs/vision.md добавляются миграциями в задачах, где они впервые нужны. После правки этого
@@ -100,7 +100,7 @@ class UserRow(Base):
     """Человек: администратор, преподаватель или ученик.
 
     Об ученике хранится минимум: имя или псевдоним. У ученика есть владелец — преподаватель,
-    который его добавил. Как выдаётся и отзывается личная ссылка — задача 13.
+    который его добавил. Личная ссылка хранится в виде хэша с отдельным сроком действия.
     """
 
     __tablename__ = "users"
@@ -115,11 +115,22 @@ class UserRow(Base):
     email: Mapped[str | None] = mapped_column(unique=True)
     password_hash: Mapped[str | None]
     link_token_hash: Mapped[str | None] = mapped_column(unique=True)
+    link_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     telegram_id: Mapped[int | None] = mapped_column(BigInteger)
     # Идентификаторы во внешних системах, например в Moodle.
     external_ids: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default=EMPTY_JSON)
     owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class LoginSessionRow(Base):
+    __tablename__ = "login_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class GroupRow(Base):

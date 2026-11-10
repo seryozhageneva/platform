@@ -4,6 +4,7 @@
 настоящего сетевого порта. Сами фейковые блоки и пайплайны из них — в `api_fakes.py`.
 """
 
+import asyncio
 import sys
 import uuid
 from collections.abc import Callable, Iterator
@@ -13,9 +14,11 @@ from api_fakes import FAKE_BLOCKS, write_blocks
 from fastapi.testclient import TestClient
 
 from backend.api.app import create_app
+from backend.api.deps import SESSION_COOKIE
 from backend.core.registry import Registry, load_registry
 from backend.llm.client import PlatformLLM
 from backend.llm.providers import StubProvider
+from backend.models.auth import AuthRepository
 from backend.models.llm_calls import LLMCallRepository
 from backend.triggers.assembly import Assembly
 
@@ -46,7 +49,9 @@ def client_of(sessions) -> Callable[[Registry], TestClient]:
 
     def make(registry: Registry) -> TestClient:
         llm = PlatformLLM(StubProvider(), call_log=LLMCallRepository(sessions))
-        return TestClient(create_app(Assembly(sessions, registry, llm)))
+        return TestClient(
+            create_app(Assembly(sessions, registry, llm)), headers={"Origin": "http://testserver"}
+        )
 
     return make
 
@@ -56,12 +61,16 @@ def client(client_of, registry_of) -> TestClient:
     return client_of(registry_of())
 
 
-@pytest.fixture
-def me(teacher) -> dict[str, str]:
-    """Заголовок «кто спрашивает» для преподавателя А."""
-    return {"X-Teacher-Id": str(teacher.id)}
+def _session_headers(sessions, user) -> dict[str, str]:
+    token, _ = asyncio.run(AuthRepository(sessions).start_teacher(user.id))
+    return {"Cookie": f"{SESSION_COOKIE}={token}"}
 
 
 @pytest.fixture
-def stranger(other_teacher) -> dict[str, str]:
-    return {"X-Teacher-Id": str(other_teacher.id)}
+def me(sessions, teacher) -> dict[str, str]:
+    return _session_headers(sessions, teacher)
+
+
+@pytest.fixture
+def stranger(sessions, other_teacher) -> dict[str, str]:
+    return _session_headers(sessions, other_teacher)

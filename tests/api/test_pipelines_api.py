@@ -1,12 +1,9 @@
 """Эндпоинты пайплайнов: сохранение с проверкой валидатором, версии, «каждый видит своё»."""
 
-import asyncio
 import copy
 import uuid
 
 from api_fakes import THREE_FAKES, chain, saved
-
-from backend.models.users import UserRepository
 
 API = "/api/v1"
 
@@ -112,21 +109,12 @@ def test_request_not_in_the_pipeline_format_is_explained(client, me):
     ]
 
 
-def test_request_must_say_who_is_asking(client, me, sessions):
+def test_request_must_have_a_session(client, teacher):
     assert client.get(f"{API}/pipelines").status_code == 401
-    assert client.get(f"{API}/pipelines", headers={"X-Teacher-Id": "not-an-id"}).status_code == 401
-    unknown = client.get(f"{API}/pipelines", headers={"X-Teacher-Id": str(uuid.uuid4())})
-    assert unknown.status_code == 401
-    assert unknown.json() == {"message": "преподаватель не найден", "problems": []}
+    old_header = client.get(f"{API}/pipelines", headers={"X-Teacher-Id": str(teacher.id)})
+    assert old_header.status_code == 401
+    assert old_header.json() == {"message": "войдите в платформу", "problems": []}
     assert client.post(f"{API}/pipelines", json=THREE_FAKES).status_code == 401
-
-
-def test_student_is_not_accepted_as_a_teacher(client, me, teacher, sessions):
-    student = asyncio.run(UserRepository(sessions).create_student(teacher.id, name="Ученик 1"))
-
-    refused = client.get(f"{API}/pipelines", headers={"X-Teacher-Id": str(student.id)})
-
-    assert refused.status_code == 401
 
 
 def test_pipelines_are_visible_only_to_their_teacher(client, me, stranger):

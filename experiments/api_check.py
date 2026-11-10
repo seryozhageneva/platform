@@ -2,27 +2,25 @@
 паузе (задача 10).
 
 Сначала в одном терминале поднимается сервер:  uv run python -m backend.api
-Потом в другом запускается проверка:           uv run python -m experiments.api_check
+Один раз заведи demo.teacher@example.test командой backend.api.create_teacher.
+Затем в другом терминале запусти проверку:           uv run python -m experiments.api_check
 
-Это не тест: скрипт пишет в рабочую базу выдуманного преподавателя (почта на `example.test`),
-его выдуманные задачи, пайплайны и запуски. Первый пайплайн — триггер и развилка «каким
-способом запущен»; второй — триггер и блок «Источник: банк задач», который берёт задачу
+Это не тест: скрипт пишет в рабочую базу выдуманные задачи, пайплайны и запуски. Первый
+пайплайн — триггер и развилка «каким способом запущен». Второй — триггер и блок
+«Источник: банк задач», который берёт задачу
 нужной темы и сложности; третий — урок из двух задач: «взять задачу» и «показать задачу и
 принять ответ». Скрипт отвечает за ученика выдуманными ответами, и запуск после каждого
 ответа идёт дальше. Ответы записываются в работы учеников. Модель не вызывается.
 """
 
-import asyncio
 import sys
+from getpass import getpass
 from typing import Any
 
 import httpx
 
-from backend.models.db import make_engine, make_sessions
-from backend.models.users import UserRepository
-
 SERVER = "http://127.0.0.1:8000/api/v1"
-TEACHER = {"name": "Демо-преподаватель", "email": "demo.teacher@example.test"}
+DEMO_EMAIL = "demo.teacher@example.test"
 PIPELINE: dict[str, Any] = {
     "format": 1,
     "id": "api_check",
@@ -105,19 +103,6 @@ LESSON_PIPELINE: dict[str, Any] = {
 }
 
 
-async def demo_teacher_id() -> str:
-    """Выдуманный преподаватель в рабочей базе; создаётся один раз."""
-    engine = make_engine()
-    try:
-        users = UserRepository(make_sessions(engine))
-        teacher = await users.find_by_email(TEACHER["email"])
-        if teacher is None:
-            teacher = await users.create_teacher(**TEACHER)
-        return str(teacher.id)
-    finally:
-        await engine.dispose()
-
-
 def check(response: httpx.Response) -> Any:
     if response.is_error:
         raise SystemExit(f"Сервер ответил отказом {response.status_code}: {response.text}")
@@ -125,14 +110,19 @@ def check(response: httpx.Response) -> Any:
 
 
 def main() -> int:
-    teacher_id = asyncio.run(demo_teacher_id())
-    print(f"Преподаватель: {TEACHER['name']} ({teacher_id})")
-    with httpx.Client(base_url=SERVER, headers={"X-Teacher-Id": teacher_id}) as api:
+    with httpx.Client(base_url=SERVER, headers={"Origin": "http://127.0.0.1:8000"}) as api:
         try:
             api.get("/health")
         except httpx.ConnectError:
             print("Сервер не отвечает. Подними его: uv run python -m backend.api")
             return 1
+        user = check(
+            api.post(
+                "/auth/teacher",
+                json={"email": DEMO_EMAIL, "password": getpass("Пароль демо-преподавателя: ")},
+            )
+        )
+        print(f"Преподаватель: {user['name']}")
         pipeline = check(api.post("/pipelines", json=PIPELINE))
         print(f"1. Пайплайн сохранён: {pipeline['id']}, версия {pipeline['version']}")
         run = check(api.post(f"/pipelines/{pipeline['id']}/runs"))
@@ -144,6 +134,7 @@ def main() -> int:
         check_bank(api)
         print("Готово: задачи создаются и выбираются по теме и сложности.")
         check_answer(api)
+        api.post("/auth/logout").raise_for_status()
     print("Готово: запуск встаёт на паузу и продолжается после ответа.")
     return 0
 

@@ -1,9 +1,10 @@
 """Миграции: применяются на чистой базе, совпадают с описанием таблиц и откатываются."""
 
 import asyncio
+import uuid
 
 from alembic import command
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.pool import NullPool
 
 from backend.models.db import make_engine
@@ -20,6 +21,7 @@ TABLES = {
     "events",
     "llm_calls",
     "submissions",
+    "login_sessions",
 }
 
 
@@ -49,3 +51,33 @@ def test_migrations_roll_back_and_apply_again(test_db_url, alembic_config, migra
 
     command.upgrade(alembic_config, "head")
     assert table_names(test_db_url) == TABLES | {"alembic_version"}
+
+
+def test_auth_upgrade_preserves_teacher_from_task_12(alembic_config, sessions):
+    teacher_id = uuid.uuid4()
+
+    async def insert_teacher():
+        async with sessions.begin() as db:
+            await db.execute(
+                text(
+                    "INSERT INTO users (id, role, name, email) "
+                    "VALUES (:id, 'teacher', 'Демо', 'legacy@example.test')"
+                ),
+                {"id": teacher_id},
+            )
+
+    async def read_teacher():
+        async with sessions() as db:
+            return (
+                await db.execute(
+                    text("SELECT email, password_hash, link_expires_at FROM users WHERE id = :id"),
+                    {"id": teacher_id},
+                )
+            ).one()
+
+    command.downgrade(alembic_config, "0003")
+    try:
+        asyncio.run(insert_teacher())
+    finally:
+        command.upgrade(alembic_config, "head")
+    assert asyncio.run(read_teacher()) == ("legacy@example.test", None, None)
