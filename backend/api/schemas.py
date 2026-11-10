@@ -10,8 +10,9 @@ from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from backend.core.contracts.manifest import Category, Manifest
 from backend.core.contracts.pipeline import Pipeline
-from backend.core.contracts.ports import CheckMethod
+from backend.core.contracts.ports import CheckMethod, InputPort, OutputPort
 from backend.core.contracts.screens import ScreenType
 from backend.core.contracts.state import RunState, RunStatus
 from backend.core.contracts.wiring import Problem
@@ -36,6 +37,22 @@ class ErrorOut(BaseModel):
 
     message: str
     problems: list[ProblemOut] = []
+
+
+class BlockCatalogItem(BaseModel):
+    id: str
+    name: str
+    description: str
+    category: Category
+    inputs: list[InputPort]
+    outputs: list[OutputPort]
+    outcomes: list[str]
+    config: dict[str, Any]
+    side_effects: bool
+
+    @classmethod
+    def of(cls, manifest: Manifest) -> "BlockCatalogItem":
+        return cls.model_validate(manifest, from_attributes=True)
 
 
 class PipelineSaved(BaseModel):

@@ -10,7 +10,7 @@ vi.mock("./api", async (importOriginal) => {
     api: {
       me: vi.fn(), teacher: vi.fn(), student: vi.fn(), logout: vi.fn(),
       tasks: vi.fn(), students: vi.fn(), createStudent: vi.fn(),
-      issueLink: vi.fn(), revokeLink: vi.fn(), lessons: vi.fn(),
+      issueLink: vi.fn(), revokeLink: vi.fn(), lessons: vi.fn(), pipelines: vi.fn(),
     },
   };
 });
@@ -22,6 +22,7 @@ beforeEach(() => {
   vi.mocked(api.tasks).mockResolvedValue([]);
   vi.mocked(api.students).mockResolvedValue([]);
   vi.mocked(api.lessons).mockResolvedValue([]);
+  vi.mocked(api.pipelines).mockResolvedValue([]);
 
 });
 

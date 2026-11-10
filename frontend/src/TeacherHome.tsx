@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiError, errorMessage } from "./api";
 import type { Student, Task } from "./api";
+import { TeacherPipelines } from "./PipelineEditor";
 
 export function TeacherHome({ accountId, onSessionChange }: {
   accountId: string;
@@ -92,6 +93,7 @@ export function TeacherHome({ accountId, onSessionChange }: {
   return (
     <>
       {error && <p role="alert">{error}</p>}
+      <TeacherPipelines accountId={accountId} onSessionChange={onSessionChange} />
       <section>
         <h2>Мои задачи</h2>
         {!busy && tasks.length === 0 && <p>В банке пока нет задач.</p>}
