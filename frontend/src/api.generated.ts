@@ -1,4 +1,21 @@
 export interface paths {
+    "/api/v1/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Назначить урок ученику */
+        post: operations["assign_api_v1_assignments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -188,6 +205,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/student/lessons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Список назначенных уроков */
+        get: operations["list_lessons_api_v1_student_lessons_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/student/lessons/{lesson_id}/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Открыть или продолжить урок */
+        post: operations["open_student_lesson_api_v1_student_lessons__lesson_id__open_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/student/lessons/{lesson_id}/responses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ответить или попросить подсказку */
+        post: operations["respond_to_lesson_api_v1_student_lessons__lesson_id__responses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/students": {
         parameters: {
             query?: never;
@@ -264,6 +332,57 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Answer */
+        Answer: {
+            file?: components["schemas"]["FileRef"] | null;
+            form: components["schemas"]["AnswerForm"];
+            /** Task Id */
+            task_id: string;
+            /** Text */
+            text?: string | null;
+        };
+        /**
+         * AnswerForm
+         * @enum {string}
+         */
+        AnswerForm: "text" | "formula" | "code" | "photo";
+        /**
+         * AnswerFormResponse
+         * @description Свободного чата нет: ученик либо отвечает, либо просит подсказку.
+         */
+        AnswerFormResponse: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "answer" | "hint";
+            answer?: components["schemas"]["Answer"] | null;
+        };
+        /** AssignmentIn */
+        AssignmentIn: {
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Pipeline Id
+             * Format: uuid
+             */
+            pipeline_id: string;
+            /**
+             * Student Id
+             * Format: uuid
+             */
+            student_id: string;
+        };
+        /** AssignmentOut */
+        AssignmentOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+        };
         /**
          * BlockNode
          * @description Блок со своими настройками и привязками входов: имя входа -> откуда взять данные.
@@ -355,6 +474,35 @@ export interface components {
             type: string;
         };
         /**
+         * FileKind
+         * @enum {string}
+         */
+        FileKind: "document" | "code" | "image" | "other";
+        /**
+         * FileRef
+         * @description Тип `File`: ссылка на файл в хранилище, а не его содержимое.
+         */
+        FileRef: {
+            /** Id */
+            id: string;
+            kind: components["schemas"]["FileKind"];
+            /** Media Type */
+            media_type: string;
+            /**
+             * Meta
+             * @default {}
+             */
+            meta: {
+                [key: string]: unknown;
+            };
+            /** Name */
+            name: string;
+            /** Size */
+            size?: number | null;
+            /** Student Id */
+            student_id?: string | null;
+        };
+        /**
          * ForEachNode
          * @description «Для каждого»: выполнить `body` отдельно для каждого элемента списка `over`.
          *
@@ -386,6 +534,15 @@ export interface components {
              */
             type: "for_each";
         };
+        /** Hint */
+        Hint: {
+            /** Level */
+            level: number;
+            /** Task Id */
+            task_id: string;
+            /** Text */
+            text: string;
+        };
         /**
          * Launch
          * @description Один способ запуска пайплайна.
@@ -414,6 +571,48 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
+        };
+        /** LessonOut */
+        LessonOut: {
+            screen?: components["schemas"]["LessonScreen"] | null;
+            status: components["schemas"]["RunStatus"];
+        };
+        /** LessonResponseIn */
+        LessonResponseIn: {
+            /** Node Id */
+            node_id: string;
+            response: components["schemas"]["AnswerFormResponse"];
+            /** Revision */
+            revision: string;
+        };
+        /** LessonScreen */
+        LessonScreen: {
+            /**
+             * Can Ask Hint
+             * @default true
+             */
+            can_ask_hint: boolean;
+            /** Forms */
+            forms: components["schemas"]["AnswerForm"][];
+            hint?: components["schemas"]["Hint"] | null;
+            /** Node Id */
+            node_id: string;
+            /** Revision */
+            revision: string;
+            /** Statement */
+            statement: string;
+            /** Task Id */
+            task_id: string;
+        };
+        /** LessonSummary */
+        LessonSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
         };
         /**
          * Limit
@@ -831,6 +1030,77 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    assign_api_v1_assignments_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Expected-Account"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentOut"];
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     logout_api_v1_auth_logout_post: {
         parameters: {
             query?: never;
@@ -1674,6 +1944,233 @@ export interface operations {
             };
             /** @description Запрос не принят: причины — в `problems` */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_lessons_api_v1_student_lessons_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Expected-Account": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonSummary"][];
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    open_student_lesson_api_v1_student_lessons__lesson_id__open_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Expected-Account": string;
+            };
+            path: {
+                lesson_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonOut"];
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сервер уроков занят */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    respond_to_lesson_api_v1_student_lessons__lesson_id__responses_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Expected-Account": string;
+            };
+            path: {
+                lesson_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LessonResponseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonOut"];
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сервер уроков занят */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException
 
-from backend.api import auth, pipelines, runs, students, tasks
+from backend.api import auth, lessons, pipelines, runs, students, tasks
 from backend.api.deps import same_origin
 from backend.api.errors import ApiError
 from backend.api.schemas import ErrorOut, ProblemOut
@@ -45,6 +45,7 @@ def create_app(assembly: Assembly | None = None) -> FastAPI:
     api = APIRouter(prefix=PREFIX, dependencies=[Depends(same_origin)])
     api.include_router(auth.router)
     api.include_router(students.router)
+    api.include_router(lessons.router)
     api.include_router(pipelines.router)
     api.include_router(runs.router)
     api.include_router(tasks.router)

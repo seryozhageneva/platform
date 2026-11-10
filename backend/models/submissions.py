@@ -28,7 +28,23 @@ class SubmissionRepository:
         student_id: uuid.UUID | None = None,
     ) -> SubmissionRow:
         """Записывает принятый ответ ученика в уроке на платформе."""
-        row = SubmissionRow(
+        row = self.answer_row(
+            owner_id, answer, run_id=run_id, node_id=node_id, student_id=student_id
+        )
+        async with self._sessions.begin() as session:
+            session.add(row)
+        return row
+
+    @staticmethod
+    def answer_row(
+        owner_id: uuid.UUID,
+        answer: Answer,
+        *,
+        run_id: uuid.UUID,
+        node_id: str,
+        student_id: uuid.UUID | None = None,
+    ) -> SubmissionRow:
+        return SubmissionRow(
             owner_id=owner_id,
             student_id=student_id,
             run_id=run_id,
@@ -39,9 +55,6 @@ class SubmissionRepository:
             text=answer.text,
             file=None if answer.file is None else answer.file.model_dump(mode="json"),
         )
-        async with self._sessions.begin() as session:
-            session.add(row)
-        return row
 
     async def for_run(self, owner_id: uuid.UUID, run_id: uuid.UUID) -> list[SubmissionRow]:
         """Работы одного запуска этого преподавателя в том порядке, в каком они сданы."""

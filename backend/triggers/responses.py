@@ -1,8 +1,7 @@
 """Ответ человека запуску, который стоит на паузе (ADR 0016).
 
-Общий путь для всех, кто отвечает: сейчас — преподаватель через API (`backend/api/runs.py`),
-в задаче 14 — ученик из своего кабинета. Кто имеет право отвечать на этот запуск, решает
-тот, кто вызывает: здесь это уже проверено.
+Общий путь для ручных запусков преподавателя и назначенных уроков ученика.
+Право отвечать на запуск проверяет вызывающий код.
 """
 
 import uuid
@@ -18,7 +17,12 @@ class NotWaiting(Exception):
 
 
 async def answer_run(
-    assembly: Assembly, state: RunState, node_id: str, response: Mapping[str, Any]
+    assembly: Assembly,
+    state: RunState,
+    node_id: str,
+    response: Mapping[str, Any],
+    *,
+    assignment_id: uuid.UUID | None = None,
 ) -> RunState:
     """Передаёт ответ узлу, на котором стоит запуск, и выполняет запуск дальше.
 
@@ -34,4 +38,6 @@ async def answer_run(
     pipeline = await assembly.pipelines.load(uuid.UUID(state.pipeline_id), state.pipeline_version)
     if pipeline is None:
         raise LookupError(f"версии {state.pipeline_version} пайплайна запуска нет в базе")
-    return await assembly.engine().respond(pipeline, state.run_id, node_id, response)
+    return await assembly.engine(assignment_id=assignment_id).respond(
+        pipeline, state.run_id, node_id, response
+    )

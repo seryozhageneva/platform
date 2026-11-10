@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiError, errorMessage } from "./api";
 import type { User } from "./api";
+import { StudentHome } from "./StudentHome";
 import { TeacherHome } from "./TeacherHome";
 
 const sessionChange = "platform-session-change";
@@ -149,6 +150,7 @@ export function App({ link }: { link: string | null }) {
         <>
           <p>Вы вошли как {user.name}.</p>
           <button type="button" disabled={busy} onClick={signOut}>Выйти</button>
+          {user.role === "student" && <StudentHome key={user.id} accountId={user.id} onSessionChange={refreshSession} />}
           {user.role === "teacher" && <TeacherHome key={user.id} accountId={user.id} onSessionChange={refreshSession} />}
         </>
       )}

@@ -5,6 +5,9 @@ const client = createClient<paths>({ credentials: "same-origin", cache: "no-stor
 
 export type User = components["schemas"]["UserOut"];
 export type Student = components["schemas"]["StudentOut"];
+export type Lesson = components["schemas"]["LessonSummary"];
+export type LessonState = components["schemas"]["LessonOut"];
+export type LessonResponse = components["schemas"]["LessonResponseIn"];
 export type Task = components["schemas"]["TaskOut"];
 
 export class ApiError extends Error {
@@ -42,6 +45,21 @@ export const api = {
   },
   async students(accountId: string) {
     return checked(await client.GET("/api/v1/students", { params: { header: account(accountId) } }));
+  },
+  async lessons(accountId: string) {
+    return checked(await client.GET("/api/v1/student/lessons", {
+      params: { header: account(accountId) },
+    }));
+  },
+  async openLesson(accountId: string, lesson_id: string) {
+    return checked(await client.POST("/api/v1/student/lessons/{lesson_id}/open", {
+      params: { path: { lesson_id }, header: account(accountId) },
+    }));
+  },
+  async respondToLesson(accountId: string, lesson_id: string, body: LessonResponse) {
+    return checked(await client.POST("/api/v1/student/lessons/{lesson_id}/responses", {
+      params: { path: { lesson_id }, header: account(accountId) }, body,
+    }));
   },
   async createStudent(accountId: string, name: string) {
     return checked(await client.POST("/api/v1/students", {
