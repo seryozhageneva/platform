@@ -41,6 +41,11 @@ export const api = {
       params: { header: account(accountId), path: { run_id } },
     }));
   },
+  async respondToRun(accountId: string, run_id: string, body: components["schemas"]["ResponseIn"]) {
+    return checked(await client.POST("/api/v1/runs/{run_id}/responses", {
+      params: { header: account(accountId), path: { run_id } }, body,
+    }));
+  },
   async runEvents(accountId: string, run_id: string) {
     return checked(await client.GET("/api/v1/runs/{run_id}/events", {
       params: { header: account(accountId), path: { run_id } },

@@ -8,9 +8,14 @@
 """
 
 import copy
-from collections.abc import Mapping
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
+
+from jsonschema import Draft202012Validator
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 from backend.core.contracts.interfaces import LLMClient
 from backend.core.contracts.manifest import Kind, Manifest
@@ -23,7 +28,7 @@ from backend.core.contracts.pipeline import (
     Transition,
     TriggerNode,
 )
-from backend.core.contracts.ports import Event, value_problems
+from backend.core.contracts.ports import DataType, Event, value_problems
 from backend.core.contracts.run import (
     BlockEvent,
     BlockRun,
@@ -34,6 +39,7 @@ from backend.core.contracts.run import (
     result_problems,
 )
 from backend.core.contracts.state import RunState, RunStatus, RunStore, WaitingFor
+from backend.core.contracts.wiring import Wiring
 from backend.core.data_flow import (
     MISSING,
     body_ids,
@@ -61,6 +67,7 @@ class LoadedBlock:
 
     manifest: Manifest
     run: BlockRun
+    validate_response: Callable[[dict[str, Any], dict[str, Any]], str | None] | None = None
 
 
 class NodeFailed(Exception):
@@ -105,9 +112,10 @@ class _Step:
     `notes`: в журнал они попадут, только когда состояние после шага сохранено.
     """
 
-    def __init__(self, places: Mapping[str, _Place], state: RunState) -> None:
+    def __init__(self, places: Mapping[str, _Place], state: RunState, pipeline: Pipeline) -> None:
         self.places = places
         self.state = state
+        self.pipeline = pipeline
         self.notes: list[Note] = []
 
     def note(self, node_id: str, kind: str, **data: Any) -> None:
@@ -330,6 +338,15 @@ class Engine:
             raise ResponseRejected(
                 f"ответ не подходит экрану «{waiting.screen.value}»: " + "; ".join(problems)
             )
+        place = _places(pipeline).get(node_id)
+        if place and isinstance(place.node, BlockNode):
+            block = self._blocks.get(place.node.block)
+            if block and block.validate_response:
+                problem = block.validate_response(
+                    copy.deepcopy(waiting.data), copy.deepcopy(dict(response))
+                )
+                if problem:
+                    raise ResponseRejected(problem)
         state.status = RunStatus.RUNNING
         return await self._advance(pipeline, state, copy.deepcopy(dict(response)))
 
@@ -346,7 +363,7 @@ class Engine:
             # Копия на случай отмены шага: с ней запуск остаётся на этом узле без следов
             # незаконченного шага — выходов, счётчиков, собранных элементов.
             before = state.model_copy(deep=True)
-            step = _Step(places, state)
+            step = _Step(places, state, pipeline)
             try:
                 await self._step(step, node_id, response)
             except NodeFailed as failure:
@@ -431,6 +448,10 @@ class Engine:
         result = await self._call(node, block, state, response)
         checked = _checked(block.manifest, result)
         if response is not None:
+            if block.validate_response and isinstance(result, Done):
+                self._check_edited_outputs(
+                    step.pipeline, node, block.manifest, state, checked["outputs"]
+                )
             step.note(node.id, "node_resumed")
         if isinstance(result, Waiting):
             who = "teacher" if block.manifest.kind is Kind.APPROVAL else "student"
@@ -445,6 +466,44 @@ class Engine:
             return
         state.waiting = []
         step.finish(node.id, checked["outputs"], result.outcome, result.events)
+
+    def _check_edited_outputs(
+        self,
+        pipeline: Pipeline,
+        node: BlockNode,
+        manifest: Manifest,
+        state: RunState,
+        outputs: dict[str, Any],
+    ) -> None:
+        computed = [port for port in manifest.outputs if port.same_as and port.name in outputs]
+        if not computed:
+            return
+        wiring = Wiring(pipeline, {name: block.manifest for name, block in self._blocks.items()})
+        types = wiring.outputs(node.id)
+        schemas = {
+            port.of: port.json_schema
+            for block in self._blocks.values()
+            for port in (*block.manifest.inputs, *block.manifest.outputs)
+            if port.of is not None and port.json_schema is not None
+        }
+        for port in computed:
+            kind = types.get(port.name)
+            value = outputs[port.name]
+            binding = node.inputs.get(port.same_as or "")
+            original = read_binding(state, binding) if binding else MISSING
+            if (
+                kind is not None
+                and kind.is_list
+                and isinstance(value, list)
+                and isinstance(original, list)
+            ):
+                # Удаление строки не меняет тип остальных. Проверяем только новые значения.
+                unchanged = {json.dumps(item, sort_keys=True) for item in original}
+                value = [
+                    item for item in value if json.dumps(item, sort_keys=True) not in unchanged
+                ]
+            if kind is None or not _fits_edited_type(value, kind, wiring, schemas):
+                raise ResponseRejected("после правок данные не соответствуют типу выхода блока")
 
     async def _call(
         self, node: BlockNode, block: LoadedBlock, state: RunState, response: dict[str, Any] | None
@@ -480,6 +539,35 @@ class Engine:
                 )
                 await self._journal(state.run_id, node.id, [], [failed])
         raise AssertionError("цикл попыток всегда заканчивается результатом или ошибкой")
+
+
+def _fits_edited_type(
+    value: Any, kind: DataType, wiring: Wiring, schemas: dict[str, dict[str, Any]]
+) -> bool:
+    if kind.is_list:
+        return isinstance(value, list) and all(
+            _fits_edited_type(item, kind.element(), wiring, schemas) for item in value
+        )
+    record = wiring.records.get(kind.of or "")
+    if record is not None and isinstance(record.collect, dict):
+        if not isinstance(value, dict):
+            return False
+        path = (*wiring.paths[record.id], record.id)
+        if value.keys() != record.collect.keys():
+            return False
+        for name, bound in record.collect.items():
+            field = wiring.binding_type(bound, record.id, path)
+            if field is None or not _fits_edited_type(value[name], field, wiring, schemas):
+                return False
+        return True
+    schema = schemas.get(kind.of or "")
+    if schema is None:
+        return not value_problems(kind, value)
+    try:
+        # Проверка правок не загружает схемы по внешним адресам.
+        return Draft202012Validator(schema, registry=Registry()).is_valid(value)
+    except Unresolvable:
+        return False
 
 
 def _storable(text: str) -> str:

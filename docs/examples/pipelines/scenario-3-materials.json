@@ -94,6 +94,7 @@
       "type": "block",
       "block": "approval.review_table",
       "title": "Преподаватель подтверждает задачи",
+      "config": {"editable_fields": "task.statement, task.solution"},
       "inputs": {"items": "each_task.results"}
     },
     {

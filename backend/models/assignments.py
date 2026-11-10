@@ -61,12 +61,9 @@ class AssignmentRepository:
             row = (await session.execute(query)).one_or_none()
             return (row.id, row.revision) if row else None
 
-    async def is_assigned(self, run_id: UUID) -> bool:
+    async def assignment_for_run(self, run_id: UUID) -> UUID | None:
         async with self._sessions() as session:
-            assignment = await session.scalar(
-                select(RunRow.assignment_id).where(RunRow.id == run_id)
-            )
-        return assignment is not None
+            return await session.scalar(select(RunRow.assignment_id).where(RunRow.id == run_id))
 
     @asynccontextmanager
     async def lock(self, assignment_id: UUID) -> AsyncIterator[None]:

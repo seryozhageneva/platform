@@ -78,16 +78,17 @@ def load_registry(root: Path, connectors: Mapping[str, Connector] | None = None)
                 )
             described = _shapes(manifest, shapes)
             if isinstance(manifest.runtime, PythonRuntime):
-                run: BlockRun | None = _find_run(root, path, manifest.runtime.entrypoint)
+                block = _load_python(root, path, manifest)
             else:
                 run = _connect(manifest, connectors.get(manifest.runtime.type))
+                block = LoadedBlock(manifest, run) if run is not None else None
         except _Refused as refused:
             problems.append(LoadProblem(path, str(refused)))
             continue
         manifests[manifest.id], sources[manifest.id] = manifest, path
         shapes.update(described)
-        if run is not None:
-            blocks[manifest.id] = LoadedBlock(manifest, run)
+        if block is not None:
+            blocks[manifest.id] = block
     # Инструменты агента сверяются, когда известны все блоки: «с последствиями» — тот
     # инструмент, которым пользуется блок с `side_effects`.
     for block_id, found in [(name, tool_problems(m, manifests)) for name, m in manifests.items()]:
@@ -143,9 +144,10 @@ def _shapes(
     return found
 
 
-def _find_run(root: Path, path: Path, entrypoint: str) -> BlockRun:
+def _load_python(root: Path, path: Path, manifest: Manifest) -> LoadedBlock:
     """Функция блока по строке «модуль:функция» из манифеста."""
-    module_name, function_name = entrypoint.split(":")
+    assert isinstance(manifest.runtime, PythonRuntime)
+    module_name, function_name = manifest.runtime.entrypoint.split(":")
     # Манифест указывает только на код своего блока: чужую функцию назвать блоком нельзя.
     package = ".".join([root.name, *path.parent.relative_to(root).parts])
     if module_name != package and not module_name.startswith(package + "."):
@@ -186,4 +188,8 @@ def _find_run(root: Path, path: Path, entrypoint: str) -> BlockRun:
             f"«{module_name}:{function_name}» должна быть объявлена как `async def`: "
             "движок ждёт результат блока, не останавливая остальные запуски"
         )
-    return run
+    # Необязательная проверка локального блока сверх общей формы экрана.
+    validate = getattr(module, f"validate_{function_name}_response", None)
+    if validate is not None and (not callable(validate) or inspect.iscoroutinefunction(validate)):
+        raise _Refused("проверка ответа должна быть синхронной функцией")
+    return LoadedBlock(manifest, run, validate_response=validate)

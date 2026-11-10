@@ -98,6 +98,7 @@ class LaunchRequest(BaseModel):
 
 
 class WaitingOut(BaseModel):
+    approval_id: uuid.UUID | None = None
     node_id: str
     who: str
     screen: ScreenType
@@ -112,6 +113,7 @@ class ResponseIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node_id: str
+    approval_id: uuid.UUID | None = None
     # Форма ответа своя у каждого экрана; её проверяет движок (`response_problems`).
     response: dict[str, Any]
 
@@ -129,7 +131,7 @@ class RunOut(BaseModel):
     error: str | None
 
     @classmethod
-    def of(cls, state: RunState) -> "RunOut":
+    def of(cls, state: RunState, approval_id: uuid.UUID | None = None) -> "RunOut":
         return cls(
             id=uuid.UUID(state.run_id),
             pipeline_id=uuid.UUID(state.pipeline_id),
@@ -138,7 +140,13 @@ class RunOut(BaseModel):
             params=state.params,
             current=state.current,
             waiting=[
-                WaitingOut(node_id=item.node_id, who=item.who, screen=item.screen, data=item.data)
+                WaitingOut(
+                    node_id=item.node_id,
+                    who=item.who,
+                    screen=item.screen,
+                    data=item.data,
+                    approval_id=approval_id if item.screen is ScreenType.REVIEW_TABLE else None,
+                )
                 for item in state.waiting
             ],
             error=state.error,

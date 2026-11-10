@@ -87,6 +87,7 @@
       "type": "block",
       "block": "approval.review_table",
       "title": "Преподаватель подтверждает рассылку",
+      "config": {"editable_fields": "message"},
       "inputs": {"items": "each_student.results"}
     },
     {

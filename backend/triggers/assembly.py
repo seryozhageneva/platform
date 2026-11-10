@@ -9,6 +9,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import replace
 from typing import Any
 
 from pydantic import ValidationError
@@ -55,15 +56,26 @@ class Assembly:
         self._llm = llm
         self._blocks = {name: self._serviced(block) for name, block in registry.blocks.items()}
 
-    def engine(self, *, assignment_id: uuid.UUID | None = None) -> Engine:
-        """Движок с настоящим хранилищем. Он ничего не помнит, поэтому на каждый раз новый."""
-        if assignment_id is None:
+    def engine(
+        self,
+        *,
+        assignment_id: uuid.UUID | None = None,
+        approval: tuple[uuid.UUID, str, dict[str, Any]] | None = None,
+    ) -> Engine:
+        """Движок с хранилищем. Буфер записей одного шага принадлежит этому движку."""
+        if assignment_id is None and approval is None:
             return Engine(self.runs, self._blocks, llm=self._llm)
         store = PgRunStore(self._sessions, assignment_id=assignment_id)
-        blocks = {
-            name: self._serviced(block, student_store=store)
-            for name, block in self.registry.blocks.items()
-        }
+        if approval is not None:
+            store.stage_approval(*approval)
+        blocks = (
+            self._blocks
+            if assignment_id is None
+            else {
+                name: self._serviced(block, student_store=store)
+                for name, block in self.registry.blocks.items()
+            }
+        )
         return Engine(store, blocks, llm=self._llm)
 
     def _serviced(
@@ -99,7 +111,7 @@ class Assembly:
             await record(block.manifest, context, result, student_store=student_store)
             return result
 
-        return LoadedBlock(block.manifest, run)
+        return replace(block, run=run)
 
     async def _record_answers(
         self,
