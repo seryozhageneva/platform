@@ -84,6 +84,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Каталог блоков */
+        get: operations["list_blocks_api_v1_blocks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -383,6 +400,28 @@ export interface components {
              */
             id: string;
         };
+        /** BlockCatalogItem */
+        BlockCatalogItem: {
+            category: components["schemas"]["Category"];
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Description */
+            description: string;
+            /** Id */
+            id: string;
+            /** Inputs */
+            inputs: components["schemas"]["InputPort"][];
+            /** Name */
+            name: string;
+            /** Outcomes */
+            outcomes: string[];
+            /** Outputs */
+            outputs: components["schemas"]["OutputPort"][];
+            /** Side Effects */
+            side_effects: boolean;
+        };
         /**
          * BlockNode
          * @description Блок со своими настройками и привязками входов: имя входа -> откуда взять данные.
@@ -433,6 +472,12 @@ export interface components {
              */
             transitions: components["schemas"]["Transition"][];
         };
+        /**
+         * Category
+         * @description Семь категорий блоков. Триггер — узел ядра, манифеста у него нет.
+         * @enum {string}
+         */
+        Category: "source" | "transform" | "student" | "check" | "ai_process" | "approval" | "sink";
         /**
          * CheckMethod
          * @description Способ проверки записан в самой задаче.
@@ -544,6 +589,33 @@ export interface components {
             text: string;
         };
         /**
+         * InputPort
+         * @description Вход блока. Необязательный вход может остаться без данных.
+         */
+        InputPort: {
+            /**
+             * List
+             * @default false
+             */
+            list: boolean;
+            /** Name */
+            name: string;
+            /** Of */
+            of?: string | null;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /** Schema */
+            schema?: {
+                [key: string]: unknown;
+            } | null;
+            /** Title */
+            title: string;
+            type: components["schemas"]["PortType"];
+        };
+        /**
          * Launch
          * @description Один способ запуска пайплайна.
          */
@@ -625,6 +697,35 @@ export interface components {
             otherwise?: string | null;
             /** Reset On */
             reset_on?: string | null;
+        };
+        /**
+         * OutputPort
+         * @description Выход блока.
+         *
+         *     У универсальных блоков тип выхода вычисляется для каждого узла: `same_as` — повторяет
+         *     тип того, что подано на указанный вход; `from_config` — записан в указанной настройке.
+         */
+        OutputPort: {
+            /** From Config */
+            from_config?: string | null;
+            /**
+             * List
+             * @default false
+             */
+            list: boolean;
+            /** Name */
+            name: string;
+            /** Of */
+            of?: string | null;
+            /** Same As */
+            same_as?: string | null;
+            /** Schema */
+            schema?: {
+                [key: string]: unknown;
+            } | null;
+            /** Title */
+            title: string;
+            type: components["schemas"]["PortType"];
         };
         /**
          * Param
@@ -746,6 +847,12 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * PortType
+         * @description Восемь видов данных, которые ходят между блоками.
+         * @enum {string}
+         */
+        PortType: "Event" | "Data" | "File" | "Text" | "Task" | "Answer" | "Verdict" | "Hint";
         /**
          * ProblemOut
          * @description Одна причина отказа или предупреждение.
@@ -1318,6 +1425,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_blocks_api_v1_blocks_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Expected-Account"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockCatalogItem"][];
                 };
             };
             /** @description Не сказано, кто спрашивает */

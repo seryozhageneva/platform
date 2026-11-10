@@ -28,6 +28,7 @@ def test_openapi_describes_every_endpoint(client):
     }
     assert found == {
         ("GET", f"{API}/health"),
+        ("GET", f"{API}/blocks"),
         ("POST", f"{API}/auth/teacher"),
         ("POST", f"{API}/auth/student"),
         ("GET", f"{API}/auth/me"),

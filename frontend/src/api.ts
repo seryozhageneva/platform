@@ -9,16 +9,20 @@ export type Lesson = components["schemas"]["LessonSummary"];
 export type LessonState = components["schemas"]["LessonOut"];
 export type LessonResponse = components["schemas"]["LessonResponseIn"];
 export type Task = components["schemas"]["TaskOut"];
+export type BlockCatalogItem = components["schemas"]["BlockCatalogItem"];
+export type Pipeline = components["schemas"]["Pipeline"];
+export type PipelineSummary = components["schemas"]["PipelineSummary"];
+export type Problem = components["schemas"]["ProblemOut"];
 
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly problems: Problem[] = []) {
     super(message);
   }
 }
 
-function checked<T>(result: { response: Response; data?: T; error?: { message: string } }): T {
+function checked<T>(result: { response: Response; data?: T; error?: { message: string; problems?: Problem[] } }): T {
   if (!result.response.ok) {
-    throw new ApiError(result.response.status, result.error?.message ?? "Запрос не выполнен.");
+    throw new ApiError(result.response.status, result.error?.message ?? "Запрос не выполнен.", result.error?.problems);
   }
   return result.data as T;
 }
@@ -28,6 +32,23 @@ function account(id: string) {
 }
 
 export const api = {
+  async blocks(accountId: string) {
+    return checked(await client.GET("/api/v1/blocks", { params: { header: account(accountId) } }));
+  },
+  async pipelines(accountId: string) {
+    return checked(await client.GET("/api/v1/pipelines", { params: { header: account(accountId) } }));
+  },
+  async pipeline(accountId: string, pipeline_id: string) {
+    return checked(await client.GET("/api/v1/pipelines/{pipeline_id}", {
+      params: { header: account(accountId), path: { pipeline_id } },
+    }));
+  },
+  async savePipeline(accountId: string, body: Pipeline, pipeline_id?: string) {
+    const header = account(accountId);
+    return pipeline_id
+      ? checked(await client.PUT("/api/v1/pipelines/{pipeline_id}", { params: { header, path: { pipeline_id } }, body }))
+      : checked(await client.POST("/api/v1/pipelines", { params: { header }, body }));
+  },
   async me() {
     return checked(await client.GET("/api/v1/auth/me"));
   },
