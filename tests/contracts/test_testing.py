@@ -1,11 +1,12 @@
-"""Подделки служб: фейковая модель отвечает заданным в тесте, подделка хранилища ищет задачи."""
+"""Подделки служб: фейковая модель отвечает заданным в тесте, подделка хранилища ищет задачи
+и отдаёт файлы."""
 
 import asyncio
 
 import pytest
 
 from backend.core.contracts.interfaces import LLMClient, LLMMessage, PlatformStore
-from backend.core.contracts.ports import CheckMethod, Task
+from backend.core.contracts.ports import CheckMethod, FileKind, FileRef, Task
 from backend.core.contracts.run import Done, RunContext
 from backend.core.contracts.testing import FakeLLM, FakeLLMError, FakeStore
 
@@ -204,3 +205,47 @@ def test_block_gets_the_store_through_context():
 
     result = asyncio.run(take_task({}, {"topic": "интегралы", "difficulty": 1}, context))
     assert result.outcome == "empty"
+
+
+LECTURE = FileRef(
+    id="file-1", name="лекция.pdf", kind=FileKind.DOCUMENT, media_type="application/pdf", size=9
+)
+
+
+def test_store_gives_file_description_and_content_by_id():
+    store = FakeStore(files=[(LECTURE, b"%PDF-1.7\n")])
+    assert asyncio.run(store.get_file("file-1")) == LECTURE
+    assert asyncio.run(store.read_file("file-1")) == b"%PDF-1.7\n"
+
+
+def test_unknown_file_is_none_not_an_error():
+    store = FakeStore(BANK, files=[(LECTURE, b"%PDF-1.7\n")])
+    assert asyncio.run(store.get_file("нет-такого")) is None
+    assert asyncio.run(store.read_file("нет-такого")) is None
+    # Задачи и файлы — разные полки: номер задачи файлом не считается.
+    assert asyncio.run(store.get_file("log-1")) is None
+
+
+def test_block_reads_a_file_through_context():
+    """Так тест блока-преобразования получает файл: описание — по входу, байты — из хранилища."""
+
+    async def measure(inputs, config, context: RunContext) -> Done:
+        ref = FileRef.model_validate(inputs["file"])
+        content = await context.store.read_file(ref.id)
+        if content is None:
+            return Done(outcome="unreadable")
+        return Done(outputs={"size": len(content)})
+
+    context = RunContext(
+        run_id="run-1",
+        node_id="measure",
+        pipeline_id="pipeline-1",
+        store=FakeStore(files=[(LECTURE, b"%PDF-1.7\n")]),
+    )
+
+    result = asyncio.run(measure({"file": LECTURE.model_dump(mode="json")}, {}, context))
+    assert result.outputs == {"size": 9}
+
+    lost = LECTURE.model_copy(update={"id": "file-2"})
+    result = asyncio.run(measure({"file": lost.model_dump(mode="json")}, {}, context))
+    assert result.outcome == "unreadable"

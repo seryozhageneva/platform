@@ -1,7 +1,8 @@
 """Таблицы базы данных (ADR 0007).
 
 Таблицы: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
-запуски, журнал событий, журнал вызовов модели (ADR 0012) и работы учеников (ADR 0016).
+запуски, журнал событий, журнал вызовов модели (ADR 0012), работы учеников (ADR 0016) и
+загруженные файлы (ADR 0023).
 Остальные сущности из
 docs/vision.md добавляются миграциями в задачах, где они впервые нужны. После правки этого
 файла нужна новая миграция: тест `tests/models/test_migrations.py` падает, если забыли
@@ -23,6 +24,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Identity,
     Index,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -33,7 +35,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from backend.core.contracts.ports import AnswerForm, CheckMethod
+from backend.core.contracts.ports import AnswerForm, CheckMethod, FileKind
 from backend.core.contracts.state import RunStatus
 
 
@@ -368,4 +370,30 @@ class SubmissionRow(Base):
     max_score: Mapped[float | None]
     comment: Mapped[str | None]
     verdict_status: Mapped[str | None] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class FileRow(Base):
+    """Загруженный файл платформы (ADR 0023): описание — как у типа `File`, плюс содержимое.
+
+    Файл принадлежит преподавателю: он загрузил его сам, или это работа его ученика. Номер
+    строки — поле `id` у ссылки `File` в пайплайне. Содержимое лежит прямо в базе и читается
+    только по отдельной просьбе: описание файла его не тянет. Размер всегда совпадает с
+    длиной содержимого — за этим следит база.
+    """
+
+    __tablename__ = "files"
+    __table_args__ = (
+        _one_of("kind", FileKind),
+        CheckConstraint("size = octet_length(content)", name="size_matches_content"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    student_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str]
+    kind: Mapped[str] = mapped_column(String(20))
+    media_type: Mapped[str]
+    size: Mapped[int] = mapped_column(BigInteger)
+    content: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

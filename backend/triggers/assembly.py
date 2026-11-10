@@ -24,6 +24,7 @@ from backend.llm.factory import make_llm
 from backend.models.assignments import AssignmentRepository
 from backend.models.auth import AuthRepository
 from backend.models.db import Sessions, make_engine, make_sessions
+from backend.models.files import FileRepository
 from backend.models.llm_calls import LLMCallRepository
 from backend.models.pipelines import PipelineRepository
 from backend.models.platform_store import PgPlatformStore
@@ -51,6 +52,7 @@ class Assembly:
         self.auth = AuthRepository(sessions)
         self.pipelines = PipelineRepository(sessions)
         self.tasks = TaskRepository(sessions)
+        self.files = FileRepository(sessions)
         self.runs = PgRunStore(sessions)
         self.submissions = SubmissionRepository(sessions)
         self._llm = llm
@@ -86,12 +88,14 @@ class Assembly:
         Модель блок получает с пометкой своего запуска и узла (ADR 0013): движок выдаёт всем
         блокам одну модель и узел ей не сообщает, а запуск и узел есть в `context`, — так
         вызов попадает в журнал вызовов с ними. Хранилище платформы — ограниченное
-        преподавателем этого запуска (ADR 0014, ADR 0015): чужих задач блок не увидит.
+        преподавателем этого запуска (ADR 0014, ADR 0015, ADR 0023): чужих задач и файлов блок
+        не увидит.
 
         Если блок ждал ученика и принял его ответ, ответ записывается в работы учеников
         (ADR 0016): у блока хранилище только на чтение, а переспрос работой не считается.
         """
         tasks = self.tasks
+        files = self.files
         record = self._record_answers
 
         async def run(
@@ -104,7 +108,7 @@ class Assembly:
                 services["llm"] = bound(run_id=context.run_id, node_id=context.node_id)
             # Без преподавателя хранилище не выдаётся: ограничить его было бы некем.
             if context.teacher_id is not None:
-                services["store"] = PgPlatformStore(tasks, uuid.UUID(context.teacher_id))
+                services["store"] = PgPlatformStore(tasks, files, uuid.UUID(context.teacher_id))
             if services:
                 context = context.model_copy(update=services)
             result = await block.run(inputs, config, context)
