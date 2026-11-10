@@ -27,8 +27,8 @@ jobs:
         run: uv run ruff check .
       - name: Правила импортов
         run: uv run lint-imports
-      - name: Поднять базу и дождаться готовности
-        run: docker compose up -d --wait postgres
+      - name: Поднять PostgreSQL и Redis и дождаться готовности
+        run: docker compose up -d --wait postgres redis
       - name: Применить миграции на чистой базе
         run: uv run alembic upgrade head
       - name: Тесты

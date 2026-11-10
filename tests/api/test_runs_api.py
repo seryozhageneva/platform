@@ -9,7 +9,7 @@ import copy
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from api_fakes import THREE_FAKES, chain, launch, saved
+from api_fakes import THREE_FAKES, chain, launch, launch_and_read, run_queued, saved
 from sqlalchemy import func, select, update
 
 from backend.core.contracts.screens import ScreenType
@@ -33,16 +33,20 @@ def test_pipeline_is_started_by_a_request_and_events_are_in_the_journal(client, 
     started = launch(client, me, pipeline_id)
 
     assert started.status_code == 201, started.text
-    run = started.json()
+    queued = started.json()
+    assert queued["status"] == "running"
+    assert journal(client, me, queued["id"]) == [("start", "run_queued")]
+    run_queued(client, queued["id"])
+    run = client.get(f"{API}/runs/{queued['id']}", headers=me).json()
     assert run["status"] == "done"
     assert run["pipeline_id"] == pipeline_id
     assert run["pipeline_version"] == 1
     assert run["current"] == [] and run["error"] is None
 
     # Состояние и журнал читаются отдельными запросами — из базы, а не из памяти сервера.
-    assert client.get(f"{API}/runs/{run['id']}", headers=me).json() == run
     events = client.get(f"{API}/runs/{run['id']}/events", headers=me).json()
     assert [(event["node_id"], event["type"]) for event in events] == [
+        ("start", "run_queued"),
         ("start", "run_started"),
         ("make", "text_made"),
         ("make", "node_done"),
@@ -51,15 +55,15 @@ def test_pipeline_is_started_by_a_request_and_events_are_in_the_journal(client, 
         ("keep", "node_done"),
         ("keep", "run_done"),
     ]
-    assert events[0]["data"] == {"trigger": "manual"}
-    assert events[4]["data"] == {"text": "ПРИВЕТ"}
+    assert events[1]["data"] == {"trigger": "manual"}
+    assert events[5]["data"] == {"text": "ПРИВЕТ"}
     assert all(event["created_at"] for event in events)
 
 
 def test_params_from_the_request_reach_the_blocks(client, me):
     pipeline_id = saved(client, me, THREE_FAKES)
 
-    run = launch(client, me, pipeline_id, phrase="логарифмы").json()
+    run = launch_and_read(client, me, pipeline_id, phrase="логарифмы").json()
 
     assert run["params"] == {"phrase": "логарифмы"}
     events = client.get(f"{API}/runs/{run['id']}/events", headers=me).json()
@@ -104,7 +108,7 @@ def test_teacher_lists_only_own_runs_with_progress_and_original_version(
     client, me, stranger, sessions, teacher
 ):
     pipeline_id = saved(client, me, THREE_FAKES)
-    finished = launch(client, me, pipeline_id).json()
+    finished = launch_and_read(client, me, pipeline_id).json()
     renamed = {**THREE_FAKES, "name": "Переименованный пайплайн"}
     assert client.put(f"{API}/pipelines/{pipeline_id}", headers=me, json=renamed).status_code == 200
     student = client.post(f"{API}/students", headers=me, json={"name": "Сова"}).json()
@@ -299,7 +303,7 @@ def test_failed_run_is_visible_with_its_error(client, me):
         client, me, chain(("broken", "transform.fake_broken"), ("keep", "sink.fake_keep"))
     )
 
-    run = launch(client, me, pipeline_id).json()
+    run = launch_and_read(client, me, pipeline_id).json()
 
     assert run["status"] == "error"
     assert run["current"] == ["broken"]
@@ -335,7 +339,7 @@ def test_model_calls_are_tagged_with_run_and_node(client, me, sessions):
         client, me, chain(("ask", "ai_process.fake_ask"), ("keep", "sink.fake_keep"))
     )
 
-    run = launch(client, me, pipeline_id, phrase="Сколько будет 2 + 2?").json()
+    run = launch_and_read(client, me, pipeline_id, phrase="Сколько будет 2 + 2?").json()
 
     assert run["status"] == "done", run["error"]
     calls = asyncio.run(LLMCallRepository(sessions).for_run(run["id"]))

@@ -4,11 +4,15 @@
 стороннего автора. Настоящий блок из `blocks/` проверяется в `test_tasks_api.py`.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import yaml
 from fastapi.testclient import TestClient
+
+from backend.triggers.worker import run_manual
 
 TEXT = {"name": "text", "title": "Текст", "type": "Text"}
 
@@ -156,3 +160,16 @@ def launch(client: TestClient, headers: dict[str, str], pipeline_id: str, **para
     return client.post(
         f"/api/v1/pipelines/{pipeline_id}/runs", json={"params": params}, headers=headers
     )
+
+
+def run_queued(client: TestClient, run_id: str) -> None:
+    """Выполняет задание вне запроса, с фейковыми блоками и моделью из сборки теста."""
+    asyncio.run(run_manual(client.app.state.assembly, UUID(run_id)))
+
+
+def launch_and_read(client: TestClient, headers: dict[str, str], pipeline_id: str, **params: Any):
+    started = launch(client, headers, pipeline_id, **params)
+    assert started.status_code == 201, started.text
+    run_id = started.json()["id"]
+    run_queued(client, run_id)
+    return client.get(f"/api/v1/runs/{run_id}", headers=headers)

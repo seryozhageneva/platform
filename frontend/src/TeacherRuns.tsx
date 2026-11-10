@@ -22,6 +22,8 @@ const statusLabels: Record<RunSummary["status"], string> = {
   error: "Ошибка",
 };
 const eventLabels: Record<string, string> = {
+  run_queued: "Запуск принят в очередь",
+  worker_failed: "Ошибка фонового запуска",
   run_started: "Запуск начался",
   node_done: "Шаг завершён",
   node_waiting: "Шаг ждёт ответа",
@@ -48,6 +50,20 @@ function RunProgress({ run }: { run: Pick<Run, "status" | "current" | "waiting" 
   </>;
 }
 
+const POLL_DELAY = 2000;
+const JOURNAL_FINAL_RETRIES = 3;
+
+function shouldRetry(failure: unknown) {
+  return !(failure instanceof ApiError) || failure.status >= 500;
+}
+
+function hasStopEvent(run: Run, events: Events) {
+  const last = events.at(-1)?.type;
+  return (run.status === "done" && last === "run_done")
+    || (run.status === "waiting" && last === "node_waiting")
+    || (run.status === "error" && (last === "node_failed" || last === "worker_failed"));
+}
+
 function RunJournal({ accountId, onSessionChange, id, revision, onRefresh }: Session & {
   id: string; revision: number; onRefresh: () => void;
 }) {
@@ -57,20 +73,40 @@ function RunJournal({ accountId, onSessionChange, id, revision, onRefresh }: Ses
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.run(accountId, id), api.runEvents(accountId, id)])
-      .then(([run, events]) => {
-        if (active) {
-          setJournal({ run, events });
-          setError("");
+    let running = false;
+    let poll: ReturnType<typeof setTimeout> | undefined;
+
+    async function read(retriesLeft = JOURNAL_FINAL_RETRIES) {
+      try {
+        // Сначала читаем статус: параллельное чтение могло бы вернуть события до этого статуса.
+        const run = await api.run(accountId, id);
+        if (!active) return;
+        if (run.status === "running") running = true;
+        const events = await api.runEvents(accountId, id);
+        if (!active) return;
+        running = run.status === "running";
+        setJournal({ run, events });
+        setError("");
+        if (running) {
+          poll = setTimeout(() => void read(), POLL_DELAY);
+        } else if (retriesLeft > 0 && events.some(({ type }) => type === "run_queued")
+          && !hasStopEvent(run, events)) {
+          // Состояние появляется раньше событий. Дочитываем журнал, но не ждём его бесконечно.
+          poll = setTimeout(() => void read(retriesLeft - 1), POLL_DELAY);
         }
-      })
-      .catch((failure: unknown) => {
-        if (active) {
-          setJournal(undefined);
-          setError(reportError(failure, onSessionChange));
+      } catch (failure: unknown) {
+        if (!active) return;
+        setError(reportError(failure, onSessionChange));
+        if (!shouldRetry(failure)) return;
+        if (running) poll = setTimeout(() => void read(), POLL_DELAY);
+        else if (retriesLeft > 0 && retriesLeft < JOURNAL_FINAL_RETRIES) {
+          poll = setTimeout(() => void read(retriesLeft - 1), POLL_DELAY);
         }
-      });
-    return () => { active = false; };
+      }
+    }
+
+    void read();
+    return () => { active = false; clearTimeout(poll); };
   }, [accountId, id, revision, onSessionChange]);
 
   const waiting = journal?.run.status === "waiting" && journal.run.waiting.find((item) =>
@@ -80,7 +116,8 @@ function RunJournal({ accountId, onSessionChange, id, revision, onRefresh }: Ses
   return <section aria-label="Журнал запуска">
     <h3>Журнал запуска</h3>
     {notice && <p role="status">{notice}</p>}
-    {error ? <p role="alert">{error}</p> : !journal ? <p role="status">Загрузка журнала…</p> : <>
+    {error && <p role="alert">{error}</p>}
+    {!journal ? !error && <p role="status">Загрузка журнала…</p> : <>
       <RunProgress run={journal.run} />
       {waiting && waiting.approval_id && table && <ApprovalTable
         key={waiting.approval_id} table={table} accountId={accountId} runId={id}
@@ -152,9 +189,11 @@ function LaunchForm({
       });
       onLaunched(run.id);
     } catch (failure) {
-      if (failure instanceof ApiError && failure.status < 500) {
+      const refusedByQueue = failure instanceof ApiError && failure.status === 503
+        && failure.problems.some(({ code }) => code === "queue_unavailable");
+      if (failure instanceof ApiError && (failure.status < 500 || refusedByQueue)) {
         setError(reportError(failure, onSessionChange));
-        setProblems(failure.problems);
+        setProblems(refusedByQueue ? [] : failure.problems);
       } else {
         setError("Сервер не подтвердил результат. Запуск мог состояться. Проверьте список запусков перед повторной отправкой.");
         setUncertain(true);
@@ -271,18 +310,31 @@ export function TeacherRuns({ accountId, onSessionChange, pipelineRevision = 0 }
   const [revision, setRevision] = useState(0);
   const [manualRevision, setManualRevision] = useState(0);
   const [error, setError] = useState("");
+  const lastRunning = useRef<{ accountId: string; running: boolean } | null>(null);
 
   useEffect(() => {
     let active = true;
-    api.runs(accountId).then((items) => {
-      if (active) {
+    let running = lastRunning.current?.accountId === accountId && lastRunning.current.running;
+    let poll: ReturnType<typeof setTimeout> | undefined;
+
+    async function read() {
+      try {
+        const items = await api.runs(accountId);
+        if (!active) return;
         setRuns(items);
         setError("");
+        running = items.some((run) => run.status === "running");
+        lastRunning.current = { accountId, running };
+      } catch (failure: unknown) {
+        if (!active) return;
+        setError(reportError(failure, onSessionChange));
+        if (!shouldRetry(failure)) return;
       }
-    }).catch((failure: unknown) => {
-      if (active) setError(reportError(failure, onSessionChange));
-    });
-    return () => { active = false; };
+      if (running) poll = setTimeout(() => void read(), POLL_DELAY);
+    }
+
+    void read();
+    return () => { active = false; clearTimeout(poll); };
   }, [accountId, revision, onSessionChange]);
 
   const approvals = runs?.filter((run) => run.status === "waiting" &&

@@ -11,7 +11,7 @@ import uuid
 from typing import Any
 
 import pytest
-from api_fakes import launch, saved
+from api_fakes import launch_and_read, saved
 
 from backend.core.registry import BUILTIN_BLOCKS, load_registry
 from backend.models.submissions import SubmissionRepository
@@ -109,8 +109,8 @@ def submissions(sessions, teacher, run_id: str):
 
 def test_run_pauses_and_continues_after_the_answer(client, me, lesson, sessions, teacher):
     """Критерий задачи 10: запуск встаёт на паузу и продолжается после ответа."""
-    started = launch(client, me, lesson)
-    assert started.status_code == 201, started.text
+    started = launch_and_read(client, me, lesson)
+    assert started.status_code == 200, started.text
     run = started.json()
     first = screen(run)
 
@@ -142,6 +142,7 @@ def test_run_pauses_and_continues_after_the_answer(client, me, lesson, sessions,
         ("show", "node_done"),
     ]
     assert journal(client, me, run["id"]) == [
+        ("start", "run_queued"),
         ("start", "run_started"),
         *one_task,
         *one_task,
@@ -158,7 +159,7 @@ def test_run_pauses_and_continues_after_the_answer(client, me, lesson, sessions,
 
 
 def test_answer_to_another_task_is_asked_again(client, me, lesson, sessions, teacher):
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
     shown = screen(run)
 
     again = respond(client, me, run["id"], answer("old-task"))
@@ -170,7 +171,7 @@ def test_answer_to_another_task_is_asked_again(client, me, lesson, sessions, tea
 
 
 def test_answer_in_a_wrong_shape_is_refused_and_changes_nothing(client, me, lesson):
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
 
     refused = respond(client, me, run["id"], {"node_id": "show", "response": {"action": "dance"}})
 
@@ -180,7 +181,7 @@ def test_answer_in_a_wrong_shape_is_refused_and_changes_nothing(client, me, less
 
 
 def test_answer_to_a_node_that_is_not_waiting_is_a_conflict(client, me, lesson):
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
 
     wrong_node = respond(client, me, run["id"], {**answer("x"), "node_id": "take_task"})
 
@@ -189,7 +190,7 @@ def test_answer_to_a_node_that_is_not_waiting_is_a_conflict(client, me, lesson):
 
 
 def test_finished_run_does_not_take_answers(client, me, lesson):
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
     for _ in range(2):
         shown = screen(client.get(f"{API}/runs/{run['id']}", headers=me).json())
         respond(client, me, run["id"], answer(shown["task_id"]))
@@ -200,7 +201,7 @@ def test_finished_run_does_not_take_answers(client, me, lesson):
 
 
 def test_other_teacher_cannot_answer(client, me, stranger, lesson):
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
 
     response = respond(client, stranger, run["id"], answer(screen(run)["task_id"]))
 
@@ -209,7 +210,7 @@ def test_other_teacher_cannot_answer(client, me, stranger, lesson):
 
 
 def test_unknown_field_in_the_body_is_refused(client, me, lesson):
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
 
     response = respond(client, me, run["id"], {**answer("x"), "nodeid": "show"})
 
@@ -218,7 +219,7 @@ def test_unknown_field_in_the_body_is_refused(client, me, lesson):
 
 def test_run_continues_on_its_own_pipeline_version(client, me, lesson):
     """Пайплайн пересохранили во время паузы — запуск всё равно идёт по своей версии."""
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
     changed = {**LESSON, "transitions": LESSON["transitions"][:2]}
     resaved = client.put(f"{API}/pipelines/{lesson}", json=changed, headers=me)
     assert resaved.status_code == 200, resaved.text
@@ -232,7 +233,7 @@ def test_run_continues_on_its_own_pipeline_version(client, me, lesson):
 
 
 def test_answer_with_a_null_character_is_asked_again(client, me, lesson, sessions, teacher):
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
 
     again = respond(client, me, run["id"], answer(screen(run)["task_id"], "SECRET\x00tail"))
 
@@ -249,7 +250,7 @@ def test_failed_submission_does_not_leak_the_answer(client, me, lesson, monkeypa
         raise RuntimeError("ошибка базы: INSERT ... [parameters: ('SECRET-ANSWER',)]")
 
     monkeypatch.setattr(client.app.state.assembly.submissions, "add_answer", broken)
-    run = launch(client, me, lesson).json()
+    run = launch_and_read(client, me, lesson).json()
 
     failed = respond(client, me, run["id"], answer(screen(run)["task_id"], "SECRET-ANSWER"))
 

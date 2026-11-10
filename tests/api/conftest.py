@@ -21,6 +21,7 @@ from backend.llm.providers import StubProvider
 from backend.models.auth import AuthRepository
 from backend.models.llm_calls import LLMCallRepository
 from backend.triggers.assembly import Assembly
+from backend.triggers.queue import EnqueueLaunch
 
 
 @pytest.fixture
@@ -44,13 +45,17 @@ def registry_of(tmp_path, monkeypatch) -> Iterator[Callable[..., Registry]]:
 
 
 @pytest.fixture
-def client_of(sessions) -> Callable[[Registry], TestClient]:
+def client_of(sessions):
     """Сервер с указанным реестром блоков; база и модель-заглушка у всех общие."""
 
-    def make(registry: Registry) -> TestClient:
+    async def accept(run_id: uuid.UUID) -> None:
+        pass  # Отдельный вызов рабочего процесса делает помощник теста.
+
+    def make(registry: Registry, *, enqueue: EnqueueLaunch = accept) -> TestClient:
         llm = PlatformLLM(StubProvider(), call_log=LLMCallRepository(sessions))
         return TestClient(
-            create_app(Assembly(sessions, registry, llm)), headers={"Origin": "http://testserver"}
+            create_app(Assembly(sessions, registry, llm), enqueue=enqueue),
+            headers={"Origin": "http://testserver"},
         )
 
     return make

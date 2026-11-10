@@ -1,13 +1,13 @@
 """Эндпоинты запусков: запустить вручную, ответить на паузе, посмотреть состояние и журнал.
 
-Запрос на запуск и ответ отвечают, когда запуск закончился, встал на паузу или остановился
-с ошибкой: движок выполняется прямо в запросе (ADR 0013). Преподаватель отвечает
+Ручной запуск идёт в очередь (ADR 0022); ответ на паузе продолжает работу в запросе.
+Преподаватель отвечает
 на паузе ручного запуска (ADR 0016) и подтверждает таблицу в назначенном уроке.
 """
 
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
 from backend.api.deps import REFUSALS, Assembled, Teacher
@@ -15,11 +15,13 @@ from backend.api.errors import ApiError
 from backend.api.schemas import ErrorOut, EventOut, LaunchRequest, ResponseIn, RunOut, RunSummary
 from backend.core.contracts.screens import ReviewTableResponse, ScreenType
 from backend.core.contracts.state import RunState, RunStatus
+from backend.core.contracts.wiring import Problem
 from backend.core.engine import ResponseRejected
 from backend.models.assignments import LessonBusy, LessonLockUnavailable
 from backend.models.tables import UserRow
 from backend.triggers.assembly import Assembly
 from backend.triggers.manual import LaunchRefused, PipelineNotFound, start_manual
+from backend.triggers.queue import QueueUnavailable
 from backend.triggers.responses import NotWaiting, answer_run
 
 router = APIRouter(tags=["Запуски"], responses=REFUSALS)
@@ -30,13 +32,24 @@ async def list_runs(teacher: Teacher, assembly: Assembled) -> list[RunSummary]:
     return [RunSummary.model_validate(row) for row in await assembly.runs.for_teacher(teacher.id)]
 
 
-@router.post("/pipelines/{pipeline_id}/runs", status_code=201, summary="Запустить пайплайн вручную")
+@router.post(
+    "/pipelines/{pipeline_id}/runs",
+    status_code=201,
+    summary="Запустить пайплайн вручную",
+    responses={503: {"model": ErrorOut, "description": "Очередь запусков недоступна"}},
+)
 async def launch_manually(
-    pipeline_id: uuid.UUID, teacher: Teacher, assembly: Assembled, body: LaunchRequest | None = None
+    pipeline_id: uuid.UUID,
+    request: Request,
+    teacher: Teacher,
+    assembly: Assembled,
+    body: LaunchRequest | None = None,
 ) -> RunOut:
+    enqueue = request.app.state.enqueue_launch
     try:
         state = await start_manual(
             assembly,
+            enqueue=enqueue or _unavailable_queue,
             teacher_id=teacher.id,
             pipeline_id=pipeline_id,
             params=body.params if body else {},
@@ -46,7 +59,14 @@ async def launch_manually(
         raise ApiError(404, str(error)) from None
     except LaunchRefused as refused:
         raise ApiError(422, str(refused), refused.problems) from None
-    return await _run_view(assembly, teacher, uuid.UUID(state.run_id))
+    except QueueUnavailable:
+        message = "очередь запусков недоступна, попробуйте позже"
+        raise ApiError(503, message, [Problem(None, "queue_unavailable", message)]) from None
+    return RunOut.of(state)
+
+
+async def _unavailable_queue(run_id: uuid.UUID) -> None:
+    raise QueueUnavailable
 
 
 async def _own_run(

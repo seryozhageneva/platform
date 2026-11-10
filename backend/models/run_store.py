@@ -5,15 +5,17 @@
 """
 
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import and_, cast, func, select, update
-from sqlalchemy.dialects.postgresql import JSONB, JSONPATH, insert
+from sqlalchemy.dialects.postgresql import JSONB, JSONPATH, Insert, insert
 
 from backend.core.contracts.run import BlockEvent
 from backend.core.contracts.screens import ScreenType
 from backend.core.contracts.state import RunState, RunStatus
-from backend.models.db import Sessions
+from backend.models.db import Sessions, advisory_key
 from backend.models.tables import (
     ApprovalRow,
     EventRow,
@@ -144,21 +146,7 @@ class PgRunStore:
         Пайплайн, его версия, ученик и преподаватель записываются один раз, при создании:
         запуск привязан к версии, с которой стартовал.
         """
-        dumped = state.model_dump(mode="json")
-        changing: dict[str, Any] = {
-            "status": state.status.value,
-            "error": state.error,
-            "state": {name: value for name, value in dumped.items() if name not in _COLUMNS},
-        }
-        query = insert(RunRow).values(
-            id=_uuid(state.run_id, "run_id"),
-            assignment_id=self._assignment_id,
-            pipeline_id=_uuid(state.pipeline_id, "pipeline_id"),
-            pipeline_version=state.pipeline_version,
-            student_id=_uuid(state.student_id, "student_id"),
-            teacher_id=_uuid(state.teacher_id, "teacher_id"),
-            **changing,
-        )
+        query, changing = self._insert_state(state)
         query = query.on_conflict_do_update(
             index_elements=[RunRow.id], set_={**changing, "updated_at": func.now()}
         )
@@ -198,6 +186,67 @@ class PgRunStore:
                                 index_where=ApprovalRow.answered_at.is_(None),
                             )
                         )
+
+    def _insert_state(self, state: RunState) -> tuple[Insert, dict[str, Any]]:
+        dumped = state.model_dump(mode="json")
+        changing = {
+            "status": state.status.value,
+            "error": state.error,
+            "state": {name: value for name, value in dumped.items() if name not in _COLUMNS},
+        }
+        query = insert(RunRow).values(
+            id=_uuid(state.run_id, "run_id"),
+            assignment_id=self._assignment_id,
+            pipeline_id=_uuid(state.pipeline_id, "pipeline_id"),
+            pipeline_version=state.pipeline_version,
+            student_id=_uuid(state.student_id, "student_id"),
+            teacher_id=_uuid(state.teacher_id, "teacher_id"),
+            **changing,
+        )
+        return query, changing
+
+    @asynccontextmanager
+    async def queue_launch(self, state: RunState, trigger_id: str) -> AsyncIterator[None]:
+        """Откатывает запуск, если постановка задания в очередь не удалась."""
+        run_id = uuid.UUID(state.run_id)
+        async with self._sessions.begin() as session:
+            await session.execute(select(func.pg_advisory_xact_lock(advisory_key(run_id))))
+            await session.execute(self._insert_state(state)[0])
+            session.add(EventRow(run_id=run_id, node_id=trigger_id, type="run_queued"))
+            await session.flush()
+            yield
+
+    async def queued_trigger(self, run_id: uuid.UUID) -> str | None:
+        """Узел триггера, если запуск поставлен в очередь и ещё не начинался."""
+        query = select(EventRow.node_id).where(
+            EventRow.run_id == run_id,
+            EventRow.type == "run_queued",
+            ~select(EventRow.id)
+            .where(EventRow.run_id == run_id, EventRow.type == "run_started")
+            .correlate(None)
+            .exists(),
+        )
+        async with self._sessions() as session:
+            return await session.scalar(query)
+
+    async def fail_queued(self, run_id: uuid.UUID, node_id: str, message: str) -> None:
+        """Останавливает фоновый запуск и записывает ошибку одной транзакцией."""
+        async with self._sessions.begin() as session:
+            changed = await session.scalar(
+                update(RunRow)
+                .where(RunRow.id == run_id, RunRow.status == RunStatus.RUNNING.value)
+                .values(status=RunStatus.ERROR.value, error=message)
+                .returning(RunRow.id)
+            )
+            if changed is not None:
+                session.add(
+                    EventRow(
+                        run_id=run_id,
+                        node_id=node_id,
+                        type="worker_failed",
+                        data={"error": message},
+                    )
+                )
 
     async def append_events(self, run_id: str, node_id: str, events: list[BlockEvent]) -> None:
         if not events:

@@ -49,7 +49,7 @@ beforeEach(() => {
     { id: 3, node_id: "check", type: "node_failed", data: {}, created_at: time },
   ]);
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 it("показывает очередь преподавателя, журнал выбранного запуска и актуальный статус после обновления", async () => {
   const student = summary("lesson", "Урок", {
@@ -268,4 +268,63 @@ it("показывает ошибку запуска после отправки
   await journal.findByText("Запуск остановился с ошибкой. Подробности в журнале.");
   await journal.findByText("Ошибка блока");
   expect(journal.queryByText("Решение принято.")).toBeNull();
+});
+
+
+it("дочитывает журнал после остановки опроса списка", async () => {
+  vi.useFakeTimers();
+  const running = summary("manual", pipeline.name, { status: "running", current: ["check"] });
+  const done = summary("manual", pipeline.name);
+  vi.mocked(api.runs).mockResolvedValueOnce([running]).mockResolvedValue([done]);
+  vi.mocked(api.run)
+    .mockResolvedValueOnce({ ...result, status: "running", error: null })
+    .mockResolvedValueOnce({ ...result, status: "running", error: null })
+    .mockResolvedValue({ ...result, status: "done", current: [], error: null });
+  const queued = { id: 1, node_id: "start", type: "run_queued", data: {}, created_at: time };
+  vi.mocked(api.runEvents)
+    .mockResolvedValueOnce([queued]).mockResolvedValueOnce([queued]).mockResolvedValueOnce([queued])
+    .mockRejectedValueOnce(new ApiError(503, "Журнал временно недоступен"))
+    .mockResolvedValue([queued, { id: 2, node_id: "check", type: "run_done", data: {}, created_at: time }]);
+
+  await act(async () => { render(<TeacherRuns {...session} />); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: pipeline.name })); });
+  const journal = within(screen.getByRole("region", { name: "Журнал запуска" }));
+  expect(journal.getByText("Выполняется")).toBeTruthy();
+  expect(journal.getByText(/Запуск принят в очередь/)).toBeTruthy();
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(journal.getByText("Выполняется")).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(journal.getByText("Завершён")).toBeTruthy();
+  expect(journal.queryByText(/Запуск завершён/)).toBeNull();
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(journal.getByRole("alert").textContent).toBe("Журнал временно недоступен");
+  expect(journal.getByText("Завершён")).toBeTruthy();
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+  expect(journal.queryByRole("alert")).toBeNull();
+  expect(journal.getByText(/Запуск завершён/)).toBeTruthy();
+  expect(api.runs).toHaveBeenCalledTimes(2);
+  expect(api.runEvents).toHaveBeenCalledTimes(5);
+});
+
+
+it("возобновляет опрос после ошибки при ручном обновлении активного запуска", async () => {
+  vi.useFakeTimers();
+  vi.mocked(api.runs)
+    .mockResolvedValueOnce([summary("manual", pipeline.name, { status: "running" })])
+    .mockRejectedValueOnce(new ApiError(503, "Временный сбой"))
+    .mockResolvedValue([summary("manual", pipeline.name)]);
+
+  await act(async () => { render(<TeacherRuns {...session} />); });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Обновить запуски" }));
+  });
+  expect(screen.getByRole("alert").textContent).toBe("Временный сбой");
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("Завершён")).toBeTruthy();
+  expect(api.runs).toHaveBeenCalledTimes(3);
 });

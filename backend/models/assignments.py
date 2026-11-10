@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import func, literal_column, select
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 
-from backend.models.db import Sessions
+from backend.models.db import Sessions, advisory_key
 from backend.models.tables import AssignmentRow, PipelineRow, RunRow
 
 
@@ -66,14 +66,17 @@ class AssignmentRepository:
             return await session.scalar(select(RunRow.assignment_id).where(RunRow.id == run_id))
 
     @asynccontextmanager
-    async def lock(self, assignment_id: UUID) -> AsyncIterator[None]:
+    async def lock(self, assignment_id: UUID, *, wait: bool = False) -> AsyncIterator[None]:
         # Отдельная транзакция держит блокировку до конца запроса, пока движок сохраняет шаги.
-        key = int.from_bytes(assignment_id.bytes[:8], "big", signed=True)
+        key = advisory_key(assignment_id)
         async with self._lock_sessions.begin() as session:
             try:
-                acquired = await session.scalar(select(func.pg_try_advisory_xact_lock(key)))
+                if wait:
+                    await session.execute(select(func.pg_advisory_xact_lock(key)))
+                else:
+                    acquired = await session.scalar(select(func.pg_try_advisory_xact_lock(key)))
             except PoolTimeout:
                 raise LessonLockUnavailable from None
-            if not acquired:
+            if not wait and not acquired:
                 raise LessonBusy
             yield

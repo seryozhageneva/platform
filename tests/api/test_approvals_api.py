@@ -7,7 +7,7 @@ from copy import deepcopy
 from uuid import UUID
 
 import pytest
-from api_fakes import launch, saved
+from api_fakes import launch_and_read, saved
 from sqlalchemy import select
 from test_lessons_api import assign, lesson_action, student_session
 
@@ -121,8 +121,8 @@ def rig(client_of, sessions):
 
 
 def paused(client, me, graph=GRAPH):
-    started = launch(client, me, saved(client, me, graph))
-    assert started.status_code == 201, started.text
+    started = launch_and_read(client, me, saved(client, me, graph))
+    assert started.status_code == 200, started.text
     run = started.json()
     assert run["status"] == "waiting", run
     [waiting] = run["waiting"]
@@ -208,7 +208,7 @@ def test_empty_input_and_reject_all_do_not_call_receiver(rig, me):
     assert decision.outcome == "rejected"
 
     items.clear()
-    result = launch(client, me, saved(client, me, {**GRAPH, "id": "empty_review"}))
+    result = launch_and_read(client, me, saved(client, me, {**GRAPH, "id": "empty_review"}))
     assert result.json()["status"] == "done"
     assert asyncio.run(approvals(result.json()["id"])) == []
     assert received == []
