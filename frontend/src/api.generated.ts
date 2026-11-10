@@ -171,6 +171,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Свои запуски */
+        get: operations["list_runs_api_v1_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}": {
         parameters: {
             query?: never;
@@ -636,6 +653,8 @@ export interface components {
          * @description Значения параметров пайплайна; незаполненные берутся по умолчанию.
          */
         LaunchRequest: {
+            /** Expected Version */
+            expected_version?: number | null;
             /**
              * Params
              * @default {}
@@ -911,6 +930,47 @@ export interface components {
          * @enum {string}
          */
         RunStatus: "running" | "waiting" | "done" | "error";
+        /** RunSummary */
+        RunSummary: {
+            /** Current */
+            current: string[];
+            /** Error */
+            error: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Pipeline Id
+             * Format: uuid
+             */
+            pipeline_id: string;
+            /** Pipeline Name */
+            pipeline_name: string;
+            /** Pipeline Version */
+            pipeline_version: number;
+            status: components["schemas"]["RunStatus"];
+            /** Student Name */
+            student_name: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Waiting */
+            waiting: components["schemas"]["RunWaitingSummary"][];
+        };
+        /** RunWaitingSummary */
+        RunWaitingSummary: {
+            /** Node Id */
+            node_id: string;
+            /**
+             * Who
+             * @enum {string}
+             */
+            who: "student" | "teacher";
+        };
         /**
          * ScreenType
          * @enum {string}
@@ -1867,6 +1927,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_runs_api_v1_runs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Expected-Account"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSummary"][];
                 };
             };
             /** @description Не сказано, кто спрашивает */

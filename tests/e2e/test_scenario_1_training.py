@@ -91,6 +91,11 @@ def test_training_gives_hint_and_advances_to_next_task(sessions, teacher):
     assert screen["task_id"] == first["id"]
     assert screen["statement"] == first["statement"]
     assert screen["hint"] is None
+    listed = teacher_client.get(f"{API}/runs").json()
+    assert len(listed) == 1
+    assert listed[0]["student_name"] == "Сова"
+    assert listed[0]["status"] == "waiting"
+    assert listed[0]["waiting"] == [{"node_id": "show", "who": "student"}]
 
     retried = _answer(student_client, lesson_path, screen, "1/3")
     assert retried["status"] == "waiting"
@@ -108,4 +113,5 @@ def test_training_gives_hint_and_advances_to_next_task(sessions, teacher):
     finished = _answer(student_client, lesson_path, screen, "3/4")
     assert finished == {"status": "done", "screen": None}
     assert _post(student_client, f"{lesson_path}/open") == finished
+    assert teacher_client.get(f"{API}/runs").json()[0]["status"] == "done"
     assert len(llm.calls) == 2

@@ -46,15 +46,30 @@ async def start_manual(
     teacher_id: uuid.UUID,
     pipeline_id: uuid.UUID,
     params: Mapping[str, Any] | None = None,
+    expected_version: int | None = None,
 ) -> RunState:
     """Запускает последнюю версию пайплайна преподавателя и выполняет её, пока она идёт сама.
 
     Возвращает состояние запуска: он закончился, встал на паузу или остановился с ошибкой.
     """
     row = await assembly.pipelines.get(teacher_id, pipeline_id)
-    pipeline = None if row is None else await assembly.pipelines.load(row.id, row.latest_version)
-    if row is None or pipeline is None:
+    if row is None:
         raise PipelineNotFound("пайплайн не найден")
+    version = row.latest_version
+    pipeline = await assembly.pipelines.load(row.id, version)
+    if pipeline is None:
+        raise PipelineNotFound("пайплайн не найден")
+    if expected_version is not None and version != expected_version:
+        raise LaunchRefused(
+            "Версия пайплайна изменилась",
+            [
+                Problem(
+                    pipeline.trigger().id,
+                    "version_changed",
+                    "Нажмите «Обновить запуски» и проверьте параметры новой версии.",
+                )
+            ],
+        )
     # Незаполненное значение — то же, что его отсутствие: тогда берётся значение по умолчанию.
     given = {name: value for name, value in (params or {}).items() if value is not None}
     problems = launch_problems(assembly, pipeline, TriggerType.MANUAL, given)
@@ -64,7 +79,7 @@ async def start_manual(
         pipeline,
         run_id=str(uuid.uuid4()),
         pipeline_id=str(row.id),
-        pipeline_version=row.latest_version,
+        pipeline_version=version,
         event=Event(trigger=TriggerType.MANUAL, occurred_at=datetime.now(UTC)),
         params=given,
         teacher_id=str(teacher_id),

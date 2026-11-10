@@ -6,7 +6,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -94,6 +94,7 @@ class LaunchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     params: dict[str, Any] = {}
+    expected_version: Annotated[int, Field(ge=1)] | None = None
 
 
 class WaitingOut(BaseModel):
@@ -142,6 +143,24 @@ class RunOut(BaseModel):
             ],
             error=state.error,
         )
+
+
+class RunWaitingSummary(BaseModel):
+    node_id: str
+    who: Literal["student", "teacher"]
+
+
+class RunSummary(BaseModel):
+    id: uuid.UUID
+    pipeline_id: uuid.UUID
+    pipeline_name: str
+    pipeline_version: int
+    student_name: str | None
+    status: RunStatus
+    current: list[str]
+    waiting: list[RunWaitingSummary]
+    error: str | None
+    updated_at: datetime
 
 
 class EventOut(BaseModel):

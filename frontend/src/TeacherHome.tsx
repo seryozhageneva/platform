@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { api, ApiError, errorMessage } from "./api";
 import type { Student, Task } from "./api";
 import { TeacherPipelines } from "./PipelineEditor";
+import { TeacherRuns } from "./TeacherRuns";
 
 export function TeacherHome({ accountId, onSessionChange }: {
   accountId: string;
@@ -15,6 +16,7 @@ export function TeacherHome({ accountId, onSessionChange }: {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [pipelineRevision, setPipelineRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -93,7 +95,10 @@ export function TeacherHome({ accountId, onSessionChange }: {
   return (
     <>
       {error && <p role="alert">{error}</p>}
-      <TeacherPipelines accountId={accountId} onSessionChange={onSessionChange} />
+      <TeacherPipelines accountId={accountId} onSessionChange={onSessionChange}
+        onPipelineSaved={() => setPipelineRevision((revision) => revision + 1)} />
+      <TeacherRuns key={accountId} accountId={accountId} onSessionChange={onSessionChange}
+        pipelineRevision={pipelineRevision} />
       <section>
         <h2>Мои задачи</h2>
         {!busy && tasks.length === 0 && <p>В банке пока нет задач.</p>}

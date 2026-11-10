@@ -11,7 +11,7 @@ from fastapi import APIRouter
 
 from backend.api.deps import REFUSALS, Assembled, Teacher
 from backend.api.errors import ApiError
-from backend.api.schemas import ErrorOut, EventOut, LaunchRequest, ResponseIn, RunOut
+from backend.api.schemas import ErrorOut, EventOut, LaunchRequest, ResponseIn, RunOut, RunSummary
 from backend.core.contracts.state import RunState
 from backend.core.engine import ResponseRejected
 from backend.models.tables import UserRow
@@ -20,6 +20,11 @@ from backend.triggers.manual import LaunchRefused, PipelineNotFound, start_manua
 from backend.triggers.responses import NotWaiting, answer_run
 
 router = APIRouter(tags=["Запуски"], responses=REFUSALS)
+
+
+@router.get("/runs", summary="Свои запуски")
+async def list_runs(teacher: Teacher, assembly: Assembled) -> list[RunSummary]:
+    return [RunSummary.model_validate(row) for row in await assembly.runs.for_teacher(teacher.id)]
 
 
 @router.post("/pipelines/{pipeline_id}/runs", status_code=201, summary="Запустить пайплайн вручную")
@@ -32,6 +37,7 @@ async def launch_manually(
             teacher_id=teacher.id,
             pipeline_id=pipeline_id,
             params=body.params if body else {},
+            expected_version=body.expected_version if body else None,
         )
     except PipelineNotFound as error:
         raise ApiError(404, str(error)) from None

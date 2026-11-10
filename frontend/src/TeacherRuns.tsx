@@ -1,0 +1,313 @@
+import { useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import { api, ApiError, errorMessage } from "./api";
+import type { Pipeline, PipelineSummary, Problem, RunSummary } from "./api";
+
+type Session = { accountId: string; onSessionChange: () => void };
+type Run = Awaited<ReturnType<typeof api.run>>;
+type Events = Awaited<ReturnType<typeof api.runEvents>>;
+type PipelineDetail = Awaited<ReturnType<typeof api.pipeline>>;
+type Param = Pipeline["params"][number];
+
+function serverOnlyDefault(param: Param) {
+  return typeof param.default === "number" && Number.isInteger(param.default)
+    && !Number.isSafeInteger(param.default);
+}
+
+const statusLabels: Record<RunSummary["status"], string> = {
+  running: "Выполняется",
+  waiting: "На паузе",
+  done: "Завершён",
+  error: "Ошибка",
+};
+const eventLabels: Record<string, string> = {
+  run_started: "Запуск начался",
+  node_done: "Шаг завершён",
+  node_waiting: "Шаг ждёт ответа",
+  node_resumed: "Шаг продолжен",
+  node_failed: "Ошибка на шаге",
+  run_done: "Запуск завершён",
+};
+
+function reportError(failure: unknown, onSessionChange: () => void) {
+  if (failure instanceof ApiError && [401, 403, 409].includes(failure.status)) onSessionChange();
+  return errorMessage(failure);
+}
+
+function RunProgress({ run }: { run: Pick<Run, "status" | "current" | "waiting" | "error"> | RunSummary }) {
+  return <>
+    <span>{statusLabels[run.status]}</span>
+    {run.status === "waiting" && run.waiting.length > 0
+      ? <ul>{run.waiting.map(({ node_id, who }) => (
+        <li key={node_id}>{node_id} · {who === "teacher" ? "ждёт преподавателя" : "ждёт ученика"}</li>
+      ))}</ul>
+      : run.current.length > 0 && <span> · Шаг: {run.current.join(", ")}</span>}
+    {run.error && <p>{run.error}</p>}
+  </>;
+}
+
+function RunJournal({ accountId, onSessionChange, id, revision }: Session & { id: string; revision: number }) {
+  const [journal, setJournal] = useState<{ run: Run; events: Events }>();
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([api.run(accountId, id), api.runEvents(accountId, id)])
+      .then(([run, events]) => {
+        if (active) {
+          setJournal({ run, events });
+          setError("");
+        }
+      })
+      .catch((failure: unknown) => {
+        if (active) {
+          setJournal(undefined);
+          setError(reportError(failure, onSessionChange));
+        }
+      });
+    return () => { active = false; };
+  }, [accountId, id, revision, onSessionChange]);
+
+  return <section aria-label="Журнал запуска">
+    <h3>Журнал запуска</h3>
+    {error ? <p role="alert">{error}</p> : !journal ? <p role="status">Загрузка журнала…</p> : <>
+      <RunProgress run={journal.run} />
+      {journal.events.length === 0 ? <p>Событий пока нет.</p> : <ol>
+        {journal.events.map((event) => <li key={event.id}>
+          <time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString("ru-RU")}</time>
+          {" · "}{event.node_id}{" · "}{Object.hasOwn(eventLabels, event.type) ? eventLabels[event.type] : event.type}
+        </li>)}
+      </ol>}
+    </>}
+  </section>;
+}
+
+function LaunchForm({
+  accountId, onSessionChange, pipeline, onLaunched, onUncertain, pending, setPending,
+}: Session & {
+  pipeline: PipelineDetail;
+  onLaunched: (id: string) => void;
+  onUncertain: () => void;
+  pending: boolean;
+  setPending: (pending: boolean) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  const [problems, setProblems] = useState<Problem[]>([]);
+  const [uncertain, setUncertain] = useState(false);
+  const sending = useRef(false);
+  const manual = pipeline.graph.nodes.some((node) =>
+    node.type === "trigger" && node.launches.some((launch) => launch.type === "manual"));
+
+  function valueOf(param: Param) {
+    return Object.hasOwn(values, param.name) ? values[param.name] ?? ""
+      : param.default == null || serverOnlyDefault(param) ? "" : String(param.default);
+  }
+
+  async function launch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!manual || pending || uncertain || sending.current) return;
+
+    setError("");
+    setProblems([]);
+    const entries: [string, string | number | boolean][] = [];
+    for (const param of pipeline.graph.params) {
+      if (param.default != null && !Object.hasOwn(values, param.name)) continue;
+      const value = valueOf(param);
+      if (value === "" && param.type !== "string") continue;
+      const typed = param.type === "boolean" ? value === "true"
+        : param.type === "string" ? value : Number(value);
+      const exactInteger = param.type === "integer" || /^[+-]?\d+$/.test(value);
+      if (typeof typed === "number" &&
+          (!Number.isFinite(typed) || (exactInteger && !Number.isSafeInteger(typed)))) {
+        setError(`«${param.title || param.name}»: браузер не может точно передать это число.`);
+        return;
+      }
+      entries.push([param.name, typed]);
+    }
+
+    sending.current = true;
+    setPending(true);
+    try {
+      const run = await api.launchRun(accountId, pipeline.id, {
+        params: Object.fromEntries(entries), expected_version: pipeline.latest_version,
+      });
+      onLaunched(run.id);
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status < 500) {
+        setError(reportError(failure, onSessionChange));
+        setProblems(failure.problems);
+      } else {
+        setError("Сервер не подтвердил результат. Запуск мог состояться. Проверьте список запусков перед повторной отправкой.");
+        setUncertain(true);
+        onUncertain();
+      }
+    } finally {
+      sending.current = false;
+      setPending(false);
+    }
+  }
+
+  if (!manual) return <p>Этот пайплайн нельзя запустить вручную.</p>;
+
+  return <form onSubmit={(event) => void launch(event)}>
+    <fieldset disabled={pending}>
+      <legend>Параметры запуска · версия {pipeline.latest_version}</legend>
+      {pipeline.graph.params.map((param) => {
+        const update = (value: string) => setValues((current) => ({ ...current, [param.name]: value }));
+        return <label key={param.name}>{param.title || param.name}
+          {param.type === "boolean" ? <select required value={valueOf(param)} onChange={(event) => update(event.target.value)}>
+            <option value="">Выберите значение</option>
+            <option value="true">Да</option>
+            <option value="false">Нет</option>
+          </select> : <input
+            type={param.type === "string" ? "text" : "number"}
+            step={param.type === "integer" ? 1 : param.type === "number" ? "any" : undefined}
+            required={param.type !== "string" && param.default == null}
+            placeholder={serverOnlyDefault(param) ? "Значение по умолчанию с сервера" : undefined}
+            value={valueOf(param)}
+            onChange={(event) => update(event.target.value)}
+          />}
+        </label>;
+      })}
+      <button type="submit" disabled={uncertain}>{pending ? "Запуск выполняется…" : "Запустить"}</button>
+    </fieldset>
+    {error && <div role="alert">
+      <p>{error}</p>
+      {problems.length > 0 && <ul>{problems.map((problem, index) =>
+        <li key={index}>{problem.node && `${problem.node} · `}{problem.message}</li>)}</ul>}
+    </div>}
+    {uncertain && <button type="button" onClick={() => setUncertain(false)}>Разрешить повторный запуск</button>}
+  </form>;
+}
+
+function ManualLaunch({ accountId, onSessionChange, revision, onLaunched, onUncertain }: Session & {
+  revision: number;
+  onLaunched: (id: string) => void;
+  onUncertain: () => void;
+}) {
+  const [pipelines, setPipelines] = useState<PipelineSummary[]>();
+  const [choice, setChoice] = useState("");
+  const [pipeline, setPipeline] = useState<PipelineDetail>();
+  const [listError, setListError] = useState("");
+  const [detailError, setDetailError] = useState("");
+  const [launching, setLaunching] = useState(false);
+  const version = pipelines?.find((item) => item.id === choice)?.latest_version;
+
+  useEffect(() => {
+    let active = true;
+    api.pipelines(accountId).then((items) => {
+      if (active) {
+        setPipelines(items);
+        setListError("");
+      }
+    }).catch((failure: unknown) => {
+      if (active) setListError(reportError(failure, onSessionChange));
+    });
+    return () => { active = false; };
+  }, [accountId, revision, onSessionChange]);
+
+  useEffect(() => {
+    if (!choice || version === undefined) return;
+    let active = true;
+    api.pipeline(accountId, choice).then((detail) => {
+      if (active) {
+        setPipeline(detail);
+        setDetailError("");
+      }
+    }).catch((failure: unknown) => {
+      if (active) setDetailError(reportError(failure, onSessionChange));
+    });
+    return () => { active = false; };
+  }, [accountId, choice, version, revision, onSessionChange]);
+
+  return <section aria-label="Ручной запуск">
+    <h3>Ручной запуск</h3>
+    {listError && <p role="alert">{listError}</p>}
+    {pipelines?.length === 0 && <p>Сначала сохраните пайплайн.</p>}
+    <label>Пайплайн для запуска
+      <select value={choice} disabled={!pipelines?.length || launching} onChange={(event) => {
+        setChoice(event.target.value);
+        setPipeline(undefined);
+        setDetailError("");
+      }}>
+        <option value="">Выберите пайплайн</option>
+        {pipelines?.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select>
+    </label>
+    {detailError && <p role="alert">{detailError}</p>}
+    {choice && version !== undefined && !detailError && (!pipeline || pipeline.latest_version < version)
+      && <p role="status">Загрузка параметров…</p>}
+    {!detailError && pipeline?.id === choice && version !== undefined && pipeline.latest_version >= version
+      && <LaunchForm key={`${pipeline.id}:${pipeline.latest_version}`} accountId={accountId}
+        onSessionChange={onSessionChange} pipeline={pipeline} onLaunched={onLaunched}
+        onUncertain={onUncertain} pending={launching} setPending={setLaunching} />}
+  </section>;
+}
+
+export function TeacherRuns({ accountId, onSessionChange, pipelineRevision = 0 }: Session & {
+  pipelineRevision?: number;
+}) {
+  const [runs, setRuns] = useState<RunSummary[]>();
+  const [selected, setSelected] = useState<string>();
+  const [revision, setRevision] = useState(0);
+  const [manualRevision, setManualRevision] = useState(0);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    api.runs(accountId).then((items) => {
+      if (active) {
+        setRuns(items);
+        setError("");
+      }
+    }).catch((failure: unknown) => {
+      if (active) setError(reportError(failure, onSessionChange));
+    });
+    return () => { active = false; };
+  }, [accountId, revision, onSessionChange]);
+
+  const approvals = runs?.filter((run) => run.status === "waiting" &&
+    run.waiting.some((item) => item.who === "teacher"));
+  const selectedRun = runs?.find((run) => run.id === selected);
+  const refresh = () => setRevision((current) => current + 1);
+
+  return <section className="teacher-runs">
+    <h2>Запуски</h2>
+    <button type="button" onClick={() => {
+      refresh();
+      setManualRevision((current) => current + 1);
+    }}>Обновить запуски</button>
+    <ManualLaunch accountId={accountId} onSessionChange={onSessionChange}
+      revision={manualRevision + pipelineRevision} onUncertain={refresh} onLaunched={(id) => {
+      setSelected(id);
+      refresh();
+    }} />
+    {error && <p role="alert">{error}</p>}
+    {!runs && !error && <p role="status">Загрузка запусков…</p>}
+    {runs && <>
+      <section aria-label="Очередь подтверждений">
+        <h3>Очередь подтверждений</h3>
+        {approvals?.length ? <ul>{approvals.map((run) => <li key={run.id}>
+          <button type="button" onClick={() => setSelected(run.id)}>{run.pipeline_name}</button>
+          {" · "}{run.waiting.filter(({ who }) => who === "teacher").map(({ node_id }) => node_id).join(", ")}
+        </li>)}</ul> : <p>Нет запусков на подтверждении.</p>}
+      </section>
+      <section aria-label="Все запуски">
+        <h3>Все запуски</h3>
+        {runs.length === 0 ? <p>Запусков пока нет.</p> : <ul>{runs.map((run) => <li key={run.id}>
+          <button type="button" aria-pressed={selected === run.id}
+            onClick={() => setSelected(run.id)}>{run.pipeline_name}</button>
+          {" · версия "}{run.pipeline_version}{" · "}{run.student_name ?? "Без ученика"}
+          {" · "}<time dateTime={run.updated_at}>{new Date(run.updated_at).toLocaleString("ru-RU")}</time>
+          <div><RunProgress run={run} /></div>
+        </li>)}</ul>}
+      </section>
+    </>}
+    {selected && <div>
+      {selectedRun && <p>{selectedRun.pipeline_name} · версия {selectedRun.pipeline_version}</p>}
+      <RunJournal key={selected} accountId={accountId} onSessionChange={onSessionChange}
+        id={selected} revision={revision} />
+    </div>}
+  </section>;
+}

@@ -23,7 +23,9 @@ function sessionError(error: unknown, refresh: () => void) {
   return false;
 }
 
-export function TeacherPipelines({ accountId, onSessionChange }: Session) {
+export function TeacherPipelines({ accountId, onSessionChange, onPipelineSaved }: Session & {
+  onPipelineSaved?: () => void;
+}) {
   const [list, setList] = useState<ListItem[]>([]);
   const [editor, setEditor] = useState<{ graph: Pipeline; id?: string; version?: number; catalog: BlockCatalogItem[] }>();
   const [busy, setBusy] = useState(true);
@@ -62,12 +64,13 @@ export function TeacherPipelines({ accountId, onSessionChange }: Session) {
     {editor ? <PipelineEditor
       initial={editor.graph} catalog={editor.catalog} id={editor.id} version={editor.version}
       accountId={accountId} onSessionChange={onSessionChange} close={() => setEditor(undefined)}
-      onSaved={(saved, graph) => setList((current) => {
+      onSaved={(saved, graph) => {
         const updated = { id: saved.id, name: graph.name, latest_version: saved.version };
-        return current.some((item) => item.id === saved.id)
+        setList((current) => current.some((item) => item.id === saved.id)
           ? current.map((item) => item.id === saved.id ? updated : item)
-          : [...current, updated];
-      })}
+          : [...current, updated]);
+        onPipelineSaved?.();
+      }}
     /> : <>
       <button type="button" disabled={busy} onClick={() => void open()}>Создать пайплайн</button>
       {busy && <p role="status">Загрузка пайплайнов…</p>}
