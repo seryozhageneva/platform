@@ -7,13 +7,14 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException
 
-from backend.api import pipelines, runs, tasks
+from backend.api import auth, pipelines, runs, students, tasks
+from backend.api.deps import same_origin
 from backend.api.errors import ApiError
 from backend.api.schemas import ErrorOut, ProblemOut
 from backend.core.contracts.base import explain
@@ -41,7 +42,9 @@ def create_app(assembly: Assembly | None = None) -> FastAPI:
     )
     app.state.assembly = assembly
 
-    api = APIRouter(prefix=PREFIX)
+    api = APIRouter(prefix=PREFIX, dependencies=[Depends(same_origin)])
+    api.include_router(auth.router)
+    api.include_router(students.router)
     api.include_router(pipelines.router)
     api.include_router(runs.router)
     api.include_router(tasks.router)

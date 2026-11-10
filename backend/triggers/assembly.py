@@ -20,6 +20,7 @@ from backend.core.contracts.run import Done, RunContext, Waiting
 from backend.core.engine import Engine, LoadedBlock
 from backend.core.registry import BUILTIN_BLOCKS, Registry, load_registry
 from backend.llm.factory import make_llm
+from backend.models.auth import AuthRepository
 from backend.models.db import Sessions, make_engine, make_sessions
 from backend.models.llm_calls import LLMCallRepository
 from backend.models.pipelines import PipelineRepository
@@ -38,6 +39,7 @@ class Assembly:
     ) -> None:
         self.registry = registry
         self.users = UserRepository(sessions)
+        self.auth = AuthRepository(sessions)
         self.pipelines = PipelineRepository(sessions)
         self.tasks = TaskRepository(sessions)
         self.runs = PgRunStore(sessions)
