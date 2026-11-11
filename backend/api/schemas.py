@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
 
 from backend.core.contracts.manifest import Category, Manifest
 from backend.core.contracts.pipeline import Pipeline
@@ -255,3 +255,20 @@ class TaskOut(TaskFields):
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+
+class StudentResultOut(BaseModel):
+    """Результат в кабинете ученика: что блок-получатель адресовал этому ученику."""
+
+    id: uuid.UUID
+    title: str
+    content: JsonValue
+    created_at: datetime
+
+
+class CabinetResultOut(StudentResultOut):
+    """Результат в кабинете преподавателя; если он адресован ученику — кому именно."""
+
+    run_id: uuid.UUID
+    student_id: uuid.UUID | None
+    student_name: str | None

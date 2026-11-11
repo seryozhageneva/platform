@@ -1,0 +1,11 @@
+id: sink.task_bank
+version: 0.1.0
+name: "Получатель: банк задач"
+description: Сохраняет подтверждённую задачу в банк задач преподавателя.
+author: platform
+category: sink
+inputs:
+  - {name: task, title: Задача, type: Task}
+outputs:
+  - {name: task, title: Задача из банка, type: Task}
+runtime: {type: python, entrypoint: "blocks.sink.task_bank:run"}

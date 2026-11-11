@@ -1,0 +1,19 @@
+id: sink.file
+version: 0.1.0
+name: "Получатель: файл"
+description: >-
+  Выгружает результат файлом — PDF, DOCX или файл импорта вопросов Moodle (Moodle XML).
+  Файл появляется в кабинете преподавателя, откуда его можно скачать.
+author: platform
+category: sink
+inputs:
+  - {name: content, title: Что выгрузить, type: Data, list: true}
+outputs:
+  - {name: file, title: Готовый файл, type: File}
+config:
+  type: object
+  properties:
+    format: {title: Формат, enum: [pdf, docx, moodle_xml], default: pdf}
+    name: {title: Имя файла без расширения, type: string, minLength: 1, maxLength: 100, default: Материалы}
+    answers: {title: Включить ответы и решения, type: boolean, default: true}
+runtime: {type: python, entrypoint: "blocks.sink.file:run"}
