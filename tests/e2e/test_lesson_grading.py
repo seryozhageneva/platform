@@ -20,7 +20,7 @@ from services.sandbox.runner import Execution
 
 
 def graph(block, form, task_id, rubric):
-    grade_inputs = {"answer" if form == "code" else "work": "show.answer"}
+    grade_inputs = {"work" if block == "check.rubric" else "answer": "show.answer"}
     if rubric is None:
         grade_inputs["task"] = "pick.task"
     return {
@@ -66,7 +66,7 @@ def post(client, path, body=None, status=200):
     return response.json()
 
 
-@pytest.mark.parametrize("mode", ["rubric_task", "rubric_config", "code"])
+@pytest.mark.parametrize("mode", ["rubric_task", "rubric_config", "code", "exact"])
 def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, mode):
     form = "code" if mode == "code" else "text"
     rubric = "1 балл за объяснение сложения."
@@ -83,7 +83,7 @@ def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, m
             {"score": 0, "max_score": 1, "comment": "Не объяснено."},
             {"score": 1, "max_score": 1, "comment": "Критерий выполнен."},
         ]
-        if form == "text"
+        if mode.startswith("rubric")
         else []
     )
     assembly = Assembly(sessions, registry, llm)
@@ -110,6 +110,8 @@ def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, m
                         "tests": json.dumps([{"stdin": "2 3\n", "stdout": "5\n"}]),
                     }
                     if form == "code"
+                    else {"check_method": "short_answer", "answer": "5"}
+                    if mode == "exact"
                     else {
                         "check_method": "long_answer",
                         "rubric": rubric,
@@ -118,7 +120,7 @@ def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, m
             },
             status=201,
         )
-        block = "check.code_tests" if form == "code" else "check.rubric"
+        block = {"code": "check.code_tests", "exact": "check.exact"}.get(mode, "check.rubric")
         configured_rubric = rubric if mode == "rubric_config" else None
         pipeline = post(
             instructor, "/pipelines", graph(block, form, task["id"], configured_rubric), status=201
@@ -141,6 +143,8 @@ def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, m
         attempts = (
             ["print(0)", "print(sum(map(int, input().split())))"]
             if form == "code"
+            else ["4", "5"]
+            if mode == "exact"
             else ["Считаем на пальцах.", "Считаем на пальцах."]
         )
         for text in attempts:
@@ -166,5 +170,7 @@ def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, m
     assert [row.text for row in rows] == attempts
     assert [row.score for row in rows] == [0, 1]
     assert [row.max_score for row in rows] == [1, 1]
-    status = "confirmed" if form == "code" else "preliminary"
+    # Вердикт пишется рядом с работой: по нему хранилище отдаёт результаты ученика (ADR 0031).
+    assert [row.correct for row in rows] == [False, True]
+    status = "preliminary" if mode.startswith("rubric") else "confirmed"
     assert [row.verdict_status for row in rows] == [status, status]

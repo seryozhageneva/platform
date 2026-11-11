@@ -1,11 +1,18 @@
-"""Подделки служб: фейковая модель отвечает заданным в тесте, подделка хранилища ищет задачи
-и отдаёт файлы."""
+"""Подделки служб: фейковая модель отвечает заданным в тесте, подделка хранилища ищет задачи,
+отдаёт файлы и результаты учеников."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from backend.core.contracts.interfaces import LLMClient, LLMMessage, PlatformStore
+from backend.core.contracts.interfaces import (
+    LLMClient,
+    LLMMessage,
+    PlatformStore,
+    StudentResults,
+    WorkResult,
+)
 from backend.core.contracts.ports import CheckMethod, FileKind, FileRef, Task
 from backend.core.contracts.run import Done, RunContext
 from backend.core.contracts.testing import FakeLLM, FakeLLMError, FakeStore
@@ -297,3 +304,71 @@ def test_result_for_an_unknown_student_is_refused():
     with pytest.raises(ValueError, match="ученик не найден"):
         asyncio.run(store.publish_result(key="k", title="Итог", content=1, student_id="s2"))
     assert store.published == []
+
+
+WEEK_AGO = datetime(2026, 11, 6, 18, 0, tzinfo=UTC)
+
+
+def work(task_id: str, at: datetime) -> WorkResult:
+    return WorkResult(
+        task_id=task_id, source="platform", submitted_at=at, status="confirmed", correct=True
+    )
+
+
+def test_fake_store_gives_results_by_name_without_older_works():
+    boris = StudentResults(
+        student_id="s-2",
+        name="Борис",
+        works=[work("old", WEEK_AGO - timedelta(days=1)), work("new", WEEK_AGO)],
+        hints=3,
+    )
+    anna = StudentResults(student_id="s-1", name="Анна")
+    store = FakeStore(results=[boris, anna])
+
+    found = asyncio.run(store.find_results(since=WEEK_AGO))
+
+    assert [one.name for one in found] == ["Анна", "Борис"]
+    assert [one.task_id for one in found[1].works] == ["new"]
+    assert found[1].hints == 3
+    # Подделка не портит то, что ей передал тест.
+    assert len(boris.works) == 2
+
+
+def test_fake_store_students_from_results_can_get_a_result():
+    store = FakeStore(results=[StudentResults(student_id="s-1", name="Анна")])
+    asyncio.run(store.publish_result(key="k", title="Итог", content="ok", student_id="s-1"))
+    assert store.published[0].student_id == "s-1"
+
+
+def test_fake_store_refuses_time_without_zone():
+    with pytest.raises(ValueError, match="часовым поясом"):
+        asyncio.run(FakeStore().find_results(since=datetime(2026, 11, 6)))
+
+
+def test_result_models_refuse_unknown_status_and_negative_hints():
+    with pytest.raises(ValueError):
+        WorkResult(source="platform", submitted_at=WEEK_AGO, status="checked")
+    with pytest.raises(ValueError):
+        StudentResults(student_id="s-1", name="Анна", hints=-1)
+
+
+def test_block_gets_student_results_through_context():
+    """Так тест блока-источника для сводки получает результаты учеников (ADR 0031)."""
+
+    async def results(inputs, config, context: RunContext) -> Done:
+        since = datetime.fromisoformat(config["since"])
+        found = await context.store.find_results(since=since)
+        return Done(outputs={"results": [one.model_dump(mode="json") for one in found]})
+
+    anna = StudentResults(student_id="s-1", name="Анна", works=[work("t-1", WEEK_AGO)], hints=1)
+    context = RunContext(
+        run_id="run-1",
+        node_id="get_results",
+        pipeline_id="pipeline-1",
+        store=FakeStore(results=[anna]),
+    )
+
+    result = asyncio.run(results({}, {"since": WEEK_AGO.isoformat()}, context))
+
+    [only] = result.outputs["results"]
+    assert (only["name"], only["hints"], only["works"][0]["task_id"]) == ("Анна", 1, "t-1")

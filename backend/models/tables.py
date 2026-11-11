@@ -352,7 +352,7 @@ class SubmissionRow(Base):
     Ученик пуст у пробного запуска преподавателя: у запуска «вручную» ученика нет. Номер
     задачи — строка без связи с банком: у задания Moodle номер не из нашей базы. Файл не
     хранится в базе — только ссылка на него (тип `File` из контракта). Оценка, комментарий
-    и статус вердикта пусты, пока работу не проверили (задачи 11 и 21).
+    и статус вердикта пусты, пока работу не проверили (задачи 11 и 21, ADR 0031).
     """
 
     __tablename__ = "submissions"
@@ -374,6 +374,8 @@ class SubmissionRow(Base):
     text: Mapped[str | None]
     # Нет файла — пустое значение базы, а не JSON `null`: так работает поиск `file IS NULL`.
     file: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    # Верно ли решена работа — поле `correct` вердикта (ADR 0031); пусто, пока не проверили.
+    correct: Mapped[bool | None]
     score: Mapped[float | None]
     max_score: Mapped[float | None]
     comment: Mapped[str | None]

@@ -6,9 +6,10 @@
 подделки с тем же интерфейсом.
 """
 
+from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from pydantic import JsonValue
+from pydantic import Field, JsonValue
 
 from backend.core.contracts.base import Strict
 from backend.core.contracts.ports import FileKind, FileRef, Task
@@ -60,6 +61,38 @@ class ToolClient(Protocol):
     async def call(self, server: str, tool: str, arguments: dict[str, Any]) -> Any: ...
 
 
+class WorkResult(Strict):
+    """Итог одной работы ученика — без текста ответа и комментария (ADR 0031).
+
+    `topic` — тема задачи из банка; у работы из Moodle или по задаче не из банка тема пуста.
+    `status`: `unchecked` — работу ещё не проверили, `preliminary` — оценил ИИ и преподаватель
+    её ещё не подтвердил, `confirmed` — оценка окончательная. У непроверенной работы
+    `correct`, `score` и `max_score` пусты.
+    """
+
+    task_id: str | None = None
+    topic: str | None = None
+    source: Literal["platform", "moodle"]
+    submitted_at: datetime
+    status: Literal["unchecked", "preliminary", "confirmed"]
+    correct: bool | None = None
+    score: float | None = None
+    max_score: float | None = None
+
+
+class StudentResults(Strict):
+    """Как учился один ученик преподавателя за период (ADR 0031).
+
+    `works` — работы от старых к новым; `hints` — сколько подсказок тьютора ученик получил.
+    Ученик без работ за период тоже есть в списке: это тоже результат.
+    """
+
+    student_id: str
+    name: str
+    works: list[WorkResult] = []
+    hints: int = Field(0, ge=0)
+
+
 @runtime_checkable
 class PlatformStore(Protocol):
     """Данные платформы для встроенного блока (ADR 0014, ADR 0023, ADR 0026).
@@ -90,6 +123,15 @@ class PlatformStore(Protocol):
 
     async def read_file(self, file_id: str) -> bytes | None:
         """Содержимое загруженного файла по номеру; `None`, если такого нет (ADR 0023)."""
+        ...
+
+    async def find_results(self, *, since: datetime) -> list[StudentResults]:
+        """Результаты всех учеников преподавателя с момента `since`, по алфавиту (ADR 0031).
+
+        `since` — время с часовым поясом; без пояса — ValueError.
+
+        Пробные запуски преподавателя без ученика сюда не попадают.
+        """
         ...
 
     async def save_task(self, task: Task, *, key: str) -> Task:
