@@ -106,11 +106,13 @@ function AnswerScreen({ screen, busy, respond }: {
 }) {
   const [form, setForm] = useState(screen.forms[0]);
   const [text, setText] = useState("");
+  const formLabels = { text: "Текст", formula: "Формула", code: "Код", photo: "Фото" };
+  const inputLabel = form === "formula" || form === "code" ? formLabels[form] : "Ответ";
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form || !text.trim()) return;
-    respond({ action: "answer", answer: { task_id: screen.task_id, form, text: text.trim() } });
+    respond({ action: "answer", answer: { task_id: screen.task_id, form, text: form === "code" ? text : text.trim() } });
   }
 
   return (
@@ -126,14 +128,20 @@ function AnswerScreen({ screen, busy, respond }: {
                 if (next) setForm(next);
               }}>
                 {screen.forms.map((item) => (
-                  <option key={item} value={item}>{item === "formula" ? "Формула" : "Текст"}</option>
+                  <option key={item} value={item}>{formLabels[item]}</option>
                 ))}
               </select>
             </label>
           )}
-          <label>{form === "formula" ? "Формула" : "Ответ"}
-            <input value={text} onChange={(event) => setText(event.target.value)}
-              disabled={busy} required aria-describedby={form === "formula" ? "formula-examples" : undefined} />
+          <label>{inputLabel}
+            {form === "formula" ? (
+              <input value={text} onChange={(event) => setText(event.target.value)}
+                disabled={busy} required aria-describedby="formula-examples" />
+            ) : (
+              <textarea className={form === "code" ? "lesson-code" : "lesson-answer"}
+                value={text} onChange={(event) => setText(event.target.value)}
+                disabled={busy} required rows={form === "code" ? 8 : 4} spellCheck={form !== "code"} />
+            )}
           </label>
           {form === "formula" && <p id="formula-examples">Например: <code>1/2</code>, <code>x^2</code>, <code>sqrt(2)</code>.</p>}
           <button disabled={busy || !text.trim()}>Отправить ответ</button>

@@ -45,3 +45,26 @@ it("показывает урок, перечитывает подсказку �
     response: { action: "answer", answer: { task_id: "task", form: "formula", text: "2/4" } },
   });
 });
+
+it("отправляет многострочный код с отступами и переводами строки", async () => {
+  vi.mocked(api.lessons).mockResolvedValue([{ id: "lesson", name: "Python" }]);
+  vi.mocked(api.openLesson).mockResolvedValue({
+    status: "waiting",
+    screen: {
+      revision: "1", task_id: "task", node_id: "show", statement: "Напечатайте числа.",
+      forms: ["code"], can_ask_hint: false,
+    },
+  });
+  vi.mocked(api.respondToLesson).mockResolvedValue({ status: "done" });
+
+  render(<StudentHome accountId="student" onSessionChange={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Python" }));
+  const code = "\nfor i in range(3):\n    print(i)\n";
+  fireEvent.change(await screen.findByLabelText("Код"), { target: { value: code } });
+  fireEvent.click(screen.getByRole("button", { name: "Отправить ответ" }));
+  await screen.findByText("Урок завершён.");
+  expect(api.respondToLesson).toHaveBeenCalledWith("student", "lesson", {
+    node_id: "show", revision: "1",
+    response: { action: "answer", answer: { task_id: "task", form: "code", text: code } },
+  });
+});

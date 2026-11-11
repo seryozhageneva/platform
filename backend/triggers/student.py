@@ -15,7 +15,7 @@ from backend.models.tables import AssignmentRow
 from backend.triggers.assembly import Assembly
 from backend.triggers.manual import LaunchRefused, PipelineNotFound, launch_problems
 
-BROWSER_FORMS = frozenset({AnswerForm.TEXT, AnswerForm.FORMULA})
+BROWSER_FORMS = frozenset({AnswerForm.TEXT, AnswerForm.FORMULA, AnswerForm.CODE})
 
 
 async def checked_lesson(
@@ -59,7 +59,9 @@ def _browser_problems(assembly: Assembly, graph: Pipeline, params: dict[str, Any
             if forms and BROWSER_FORMS.isdisjoint(forms):
                 problems.append(
                     Problem(
-                        node.id, "unsupported_screen", "форма должна принимать текст или формулу"
+                        node.id,
+                        "unsupported_screen",
+                        "форма должна принимать текст, формулу или код",
                     )
                 )
     return problems
@@ -96,4 +98,4 @@ async def open_lesson(
     graph = await assembly.pipelines.load(assignment.pipeline_id, state.pipeline_version)
     if graph is None:
         raise LookupError("версия запуска урока исчезла")
-    return await assembly.engine().resume(graph, state.run_id)
+    return await assembly.engine(assignment_id=assignment.id).resume(graph, state.run_id)

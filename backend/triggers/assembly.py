@@ -6,17 +6,19 @@
 """
 
 import logging
+import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
 from typing import Any
 
+import httpx
 from pydantic import ValidationError
 
 from backend.core.contracts.interfaces import LLMClient
 from backend.core.contracts.manifest import Kind, Manifest
-from backend.core.contracts.ports import Answer, PortType
+from backend.core.contracts.ports import Answer, PortType, Verdict
 from backend.core.contracts.run import Done, RunContext, Waiting
 from backend.core.engine import Engine, LoadedBlock
 from backend.core.registry import BUILTIN_BLOCKS, Registry, load_registry
@@ -29,11 +31,13 @@ from backend.models.llm_calls import LLMCallRepository
 from backend.models.pipelines import PipelineRepository
 from backend.models.platform_store import PgPlatformStore
 from backend.models.run_store import PgRunStore
-from backend.models.submissions import SubmissionRepository
+from backend.models.submissions import SubmissionGrade, SubmissionRepository
 from backend.models.tasks import TaskRepository
 from backend.models.users import UserRepository
+from backend.triggers.http_blocks import HTTP_BLOCK_TIMEOUT, http_connector
 
 logger = logging.getLogger(__name__)
+_GRADING_INPUTS = {"check.code_tests": "answer", "check.rubric": "work"}
 
 
 class Assembly:
@@ -113,6 +117,8 @@ class Assembly:
                 context = context.model_copy(update=services)
             result = await block.run(inputs, config, context)
             await record(block.manifest, context, result, student_store=student_store)
+            if student_store is not None:
+                _stage_grade(student_store, block.manifest.id, inputs, context, result)
             return result
 
         return replace(block, run=run)
@@ -167,6 +173,30 @@ class Assembly:
                 ) from None
 
 
+def _stage_grade(
+    store: PgRunStore,
+    block_id: str,
+    inputs: dict[str, Any],
+    context: RunContext,
+    result: Done | Waiting,
+) -> None:
+    answer_input = _GRADING_INPUTS.get(block_id)
+    if answer_input is None or not isinstance(result, Done) or context.teacher_id is None:
+        return
+    try:
+        answer = Answer.model_validate(inputs.get(answer_input))
+        verdict = Verdict.model_validate(result.outputs.get("verdict"))
+    except ValidationError:
+        # Текст из документа в этом блоке тоже допустим. Он не является ответом из урока.
+        return
+    if verdict.task_id == answer.task_id:
+        store.stage_grade(
+            SubmissionGrade(
+                uuid.UUID(context.teacher_id), uuid.UUID(context.run_id), answer, verdict
+            )
+        )
+
+
 @asynccontextmanager
 async def open_assembly(*, llm: LLMClient | None = None) -> AsyncIterator[Assembly]:
     """Сборка для сервера с отдельным пулом соединений для блокировок урока."""
@@ -180,7 +210,13 @@ async def open_assembly(*, llm: LLMClient | None = None) -> AsyncIterator[Assemb
             platform_llm = make_llm(call_log=LLMCallRepository(sessions))
             resources.push_async_callback(platform_llm.aclose)
             llm = platform_llm
-        registry = load_registry(BUILTIN_BLOCKS)
+        http = await resources.enter_async_context(
+            httpx.AsyncClient(timeout=httpx.Timeout(HTTP_BLOCK_TIMEOUT, connect=2), trust_env=False)
+        )
+        registry = load_registry(
+            BUILTIN_BLOCKS,
+            {"http": http_connector(http, sandbox_url=os.environ.get("PLATFORM_SANDBOX_URL"))},
+        )
         for problem in registry.problems:
             logger.warning("блок не загружен: %s", problem)
         yield Assembly(sessions, registry, llm, lock_sessions=make_sessions(lock_engine))
