@@ -6,8 +6,11 @@ import pytest
 from backend.core.contracts.manifest import load_manifest
 from backend.core.contracts.run import RunContext
 from backend.core.contracts.testing import FakeLLM, FakeLLMError
+from backend.core.validator import config_problems
 from blocks.ai_process.generate import run
 
+ROOT = Path(__file__).resolve().parents[1]
+MANIFEST = ROOT / "blocks/ai_process/generate/block.yaml"
 SUMMARY_CONFIG = {
     "prompt": "Лекция: {data}\nОпорные сведения: {context}",
     "result": {"type": "Data", "of": "summary"},
@@ -95,7 +98,25 @@ def test_answer_without_preset_uses_port_contract():
 
 
 def test_manifest_matches_its_example():
-    root = Path(__file__).resolve().parents[1]
-    assert load_manifest(root / "blocks/ai_process/generate/block.yaml") == load_manifest(
-        root / "docs/examples/manifests/ai_process.generate.yaml"
+    assert load_manifest(MANIFEST) == load_manifest(
+        ROOT / "docs/examples/manifests/ai_process.generate.yaml"
     )
+
+
+@pytest.mark.parametrize(
+    ("config", "wrong_result", "error"),
+    [
+        (SUMMARY_CONFIG, {"type": "Data", "of": "digest"}, "result.of"),
+        (SUMMARY_CONFIG, {"type": "Data"}, "«of»"),
+        (SUMMARY_CONFIG, {"type": "Data", "of": "summary", "list": True}, "result.list"),
+        (TASKS_CONFIG, {"type": "Answer", "list": True}, "result.type"),
+        (TASKS_CONFIG, {"type": "Task"}, "«list»"),
+        (TASKS_CONFIG, {"type": "Task", "list": False}, "result.list"),
+    ],
+)
+def test_config_validation_rejects_incompatible_preset(config, wrong_result, error):
+    schema = load_manifest(MANIFEST).config
+    assert config_problems(config, schema, {}) == []
+    problems = config_problems({**config, "result": wrong_result}, schema, {})
+    assert len(problems) == 1
+    assert error in problems[0]

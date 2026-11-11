@@ -29,4 +29,28 @@ config:
       type: string
       enum: [lecture_summary, lecture_tasks]
     model: {title: Модель, type: string}
+  allOf:
+    - if:
+        required: [result_schema]
+        properties:
+          result_schema: {const: lecture_summary}
+      then:
+        properties:
+          result:
+            required: [of]
+            properties:
+              type: {enum: [Data]}
+              of: {enum: [summary]}
+              list: {enum: [false]}
+    - if:
+        required: [result_schema]
+        properties:
+          result_schema: {const: lecture_tasks}
+      then:
+        properties:
+          result:
+            required: [list]
+            properties:
+              type: {enum: [Task]}
+              list: {enum: [true]}
 runtime: {type: python, entrypoint: "blocks.ai_process.generate:run"}
