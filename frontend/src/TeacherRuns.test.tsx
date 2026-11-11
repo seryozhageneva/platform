@@ -111,6 +111,21 @@ it("запускает с типизированными параметрами 
   expect(api.runs).toHaveBeenCalledTimes(2);
 });
 
+it("показывает в журнале причину, по которой не извлечён текст", async () => {
+  vi.mocked(api.runs).mockResolvedValue([summary("manual", "Лекция")]);
+  vi.mocked(api.run).mockResolvedValue({ ...result, status: "done", current: [], error: null });
+  vi.mocked(api.runEvents).mockResolvedValue([
+    { id: 3, node_id: "extract", type: "document_unreadable", created_at: time,
+      data: { message: "PDF защищён паролем" } },
+    { id: 4, node_id: "extract", type: "run_done", created_at: time, data: {} },
+  ]);
+  render(<TeacherRuns {...session} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Лекция" }));
+
+  const journal = within(screen.getByRole("region", { name: "Журнал запуска" }));
+  expect(await journal.findByText(/Документ не прочитан · PDF защищён паролем/)).toBeTruthy();
+});
+
 it("при потере ответа обновляет список, сохраняет форму и требует явно разрешить повтор", async () => {
   const launch = vi.spyOn(api, "launchRun").mockRejectedValue(new TypeError("connection lost"));
   render(<TeacherRuns {...session} />);

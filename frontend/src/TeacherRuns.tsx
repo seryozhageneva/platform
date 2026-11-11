@@ -30,6 +30,8 @@ const eventLabels: Record<string, string> = {
   node_resumed: "Шаг продолжен",
   approval_decided: "Решение преподавателя",
   node_failed: "Ошибка на шаге",
+  file_missing: "Файл не найден",
+  document_unreadable: "Документ не прочитан",
   run_done: "Запуск завершён",
 };
 
@@ -127,6 +129,8 @@ function RunJournal({ accountId, onSessionChange, id, revision, onRefresh }: Ses
         {journal.events.map((event) => <li key={event.id}>
           <time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString("ru-RU")}</time>
           {" · "}{event.node_id}{" · "}{Object.hasOwn(eventLabels, event.type) ? eventLabels[event.type] : event.type}
+          {(event.type === "file_missing" || event.type === "document_unreadable") &&
+            typeof event.data.message === "string" && <> · {event.data.message}</>}
           {event.type === "approval_decided" && typeof event.data.kept === "number" &&
             typeof event.data.changed === "number" && typeof event.data.skipped === "number" &&
             <> · {event.data.outcome === "approved" ? "подтверждено" : "отклонено"}.
