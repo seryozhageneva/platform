@@ -73,8 +73,9 @@
             "block": "ai_process.generate",
             "title": "Решить независимо",
             "config": {
-              "prompt": "Реши задачу, не глядя на эталон. Верни только ответ.",
-              "result": {"type": "Answer"}
+              "prompt": "Реши задачу. Верни только ответ.",
+              "result": {"type": "Answer"},
+              "data_fields": ["id", "statement"]
             },
             "inputs": {"data": "each_task.item"}
           },

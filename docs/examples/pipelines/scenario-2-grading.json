@@ -63,7 +63,7 @@
             "type": "block",
             "block": "transform.extract_code",
             "title": "Извлечь код",
-            "inputs": {"file": "each_work.item"}
+            "inputs": {"file": "each_work.item", "task": "get_task.task"}
           },
           {
             "id": "check_text",
@@ -86,7 +86,7 @@
             "title": "Написать комментарий",
             "config": {
               "prompt": "Напиши студенту комментарий к работе по вердикту проверки.",
-              "result": {"type": "Data", "of": "feedback"}
+              "result": {"type": "Text"}
             },
             "inputs": {
               "data": ["extract.text", "extract_code.answer"],
@@ -115,7 +115,7 @@
       "type": "block",
       "block": "approval.review_table",
       "title": "Преподаватель подтверждает оценки",
-      "config": {"editable_fields": "comment"},
+      "config": {"editable_fields": "comment.text"},
       "inputs": {"items": "each_work.results"}
     },
     {

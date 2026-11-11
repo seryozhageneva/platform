@@ -28,6 +28,15 @@ def _prompt(template: str, inputs: dict[str, Any]) -> str:
     return prompt
 
 
+def _only_fields(value: Any, fields: list[str]) -> Any:
+    """Оставляет в записи (или в каждой записи списка) только перечисленные поля."""
+    if isinstance(value, dict):
+        return {name: value[name] for name in fields if name in value}
+    if isinstance(value, list) and all(isinstance(item, dict) for item in value):
+        return [_only_fields(item, fields) for item in value]
+    raise ValueError("поля можно выбрать только у записи или списка записей")
+
+
 def _schema(kind: DataType, preset: str | None) -> dict[str, Any]:
     if preset == "lecture_summary" and kind == SUMMARY_TYPE:
         return {
@@ -75,6 +84,8 @@ async def run(inputs: dict[str, Any], config: dict[str, Any], context: RunContex
         raise RuntimeError("блоку не выдана модель")
     kind = DataType.model_validate(config["result"])
     schema = _schema(kind, config.get("result_schema"))
+    if "data_fields" in config:
+        inputs = {**inputs, "data": _only_fields(inputs["data"], config["data_fields"])}
     message = LLMMessage(role="user", content=_prompt(config["prompt"], inputs))
     reply = await llm.complete([message], schema=schema, model=config.get("model"))
     # Слой модели проверяет JSON Schema. Здесь также действуют правила типа порта,
