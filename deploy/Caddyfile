@@ -1,0 +1,28 @@
+# Caddy на сервере платформы (задача 24a, ADR 0030).
+# Домен берётся из переменной PLATFORM_DOMAIN в .env на сервере: в репозитории его нет.
+# Для настоящего домена Caddy сам получает и продлевает бесплатный сертификат Let's Encrypt.
+# Для «localhost» (проверка на своём компьютере) он выпускает сертификат своим, локальным
+# удостоверяющим центром. Запросы по http:// Caddy сам перенаправляет на https://.
+
+{$PLATFORM_DOMAIN} {
+	encode zstd gzip
+
+	# API. Наружу открыт только /api/…: страницы /docs и /openapi.json остаются внутри.
+	# Caddy передаёт API заголовок X-Forwarded-Proto: так API узнаёт, что снаружи был HTTPS.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Всё остальное — собранный фронтенд.
+	handle {
+		root * /srv
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		-Server
+	}
+}

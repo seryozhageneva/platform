@@ -60,6 +60,10 @@ docker compose -f docker-compose.moodle.yml up -d --wait    поднять те�
 uv run python -m experiments.moodle_setup    наполнить тестовый Moodle выдуманными курсом, заданием и сдачами
 uv run python -m experiments.moodle_check    ручная проверка MCP-сервера Moodle на тестовом Moodle
 docker compose -f docker-compose.moodle.yml down    остановить тестовый Moodle (данные сохраняются)
+docker build -t platform-code-runner:local services/sandbox    образ для программ учеников (песочница, ADR 0025)
+docker compose -f docker-compose.prod.yml up -d --build --wait    вся платформа в контейнерах за Caddy с HTTPS; нужен PLATFORM_DOMAIN в .env (docs/deploy.md, ADR 0030)
+docker compose -f docker-compose.prod.yml down    остановить платформу в контейнерах (данные сохраняются)
+uv run python -m experiments.deploy_check https://адрес    проверка развёрнутой платформы: страница, API, HTTPS, вход (гейт 2)
 pnpm --dir frontend dev          запустить фронтенд и перенаправлять запросы /api на локальный сервер
 pnpm --dir frontend api:generate  обновить типы клиента после изменения API
 pnpm --dir frontend api:check    проверить, что типы клиента совпадают с API

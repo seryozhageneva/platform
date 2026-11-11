@@ -1,0 +1,136 @@
+# Платформа целиком — для сервера (VPS) и для проверки на своём компьютере (ADR 0030).
+# Как пользоваться — пошагово в docs/deploy.md. Коротко:
+#   docker build -t platform-code-runner:local services/sandbox
+#   docker compose -f docker-compose.prod.yml up -d --build --wait
+#   docker compose -f docker-compose.prod.yml down
+# Наружу открыт только Caddy (порты 80 и 443). База, Redis, API и песочница видны лишь
+# друг другу внутри Docker. Секреты и домен берутся из .env рядом с этим файлом.
+
+name: platform-prod
+
+# Общее для миграций, API и рабочего процесса: один образ, разные команды. Собирается он
+# в описании api (build), остальные берут уже собранный.
+x-platform: &platform
+  image: platform:local
+  env_file: .env
+  environment: &platform-env
+    # Адрес базы собирается из пароля: база живёт в соседнем контейнере «postgres».
+    DATABASE_URL: postgresql+asyncpg://platform:${POSTGRES_PASSWORD:?Добавь POSTGRES_PASSWORD в .env}@postgres:5432/platform
+    REDIS_URL: redis://redis:6379/0
+    PLATFORM_SANDBOX_URL: http://sandbox:8001
+  volumes:
+    # Корневой сертификат для GigaChat (ADR 0012): только чтение.
+    - ./certs:/app/certs:ro
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_DB: platform
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Добавь POSTGRES_PASSWORD в .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U platform -d platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Миграции базы: выполняются при каждом запуске и завершаются. API ждёт их окончания.
+  migrate:
+    <<: *platform
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *platform
+    build:
+      context: .
+      target: platform
+    environment:
+      <<: *platform-env
+      # Внутри контейнера API слушает все адреса, но его порт наружу не открыт: к нему
+      # приходят только соседние контейнеры. Поэтому заголовкам X-Forwarded-* от них можно
+      # верить — их ставит Caddy.
+      PLATFORM_API_HOST: 0.0.0.0
+      PLATFORM_TRUSTED_PROXIES: "*"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Рабочий процесс очереди: выполняет ручные запуски (ADR 0022).
+  worker:
+    <<: *platform
+    command: ["arq", "backend.triggers.worker.WorkerSettings"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # Песочница для кода (ADR 0025). Запускает одноразовые контейнеры через Docker сервера —
+  # поэтому ей подключён docker.sock. Образ для них собирается заранее, см. docs/deploy.md.
+  sandbox:
+    image: platform-sandbox:local
+    build:
+      context: .
+      target: sandbox
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/manifest')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Caddy: единственный, кто виден из интернета.
+  web:
+    image: platform-web:local
+    build:
+      context: .
+      target: web
+    environment:
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:?Добавь PLATFORM_DOMAIN в .env — домен сайта или localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # Сертификаты HTTPS: переживают перезапуск, иначе Caddy просил бы новые каждый раз.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

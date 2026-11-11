@@ -1,0 +1,26 @@
+# Что не попадает в образы (Dockerfile). Главное — секреты: .env и сертификаты
+# подключаются к контейнерам только при запуске, в образе их нет.
+.env
+.env.*
+certs/
+.git/
+.github/
+.claude/
+.codex/
+.agents/
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+frontend/node_modules/
+frontend/dist/
+experiments/
+tests/
+docs/
+uploads/
+backups/
+tmp/
+*.log
+*.dump
