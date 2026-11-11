@@ -1,9 +1,12 @@
 """Чтение документов из поддельного хранилища без базы."""
 
 import asyncio
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
+from docx import Document
 
 from backend.core.contracts.manifest import load_manifest
 from backend.core.contracts.ports import FileKind, FileRef, Text
@@ -56,6 +59,37 @@ def test_extracts_text_in_document_order_and_keeps_the_source(
     result = asyncio.run(run({"file": file.model_dump()}, {}, context(store)))
     assert result.outcome == "ok"
     assert Text.model_validate(result.outputs["text"]) == Text(text=expected, source=file)
+
+
+def test_extracts_text_from_nested_docx_tables():
+    document = Document()
+    document.add_paragraph("Перед таблицей")
+    cell = document.add_table(rows=1, cols=1).cell(0, 0)
+    cell.add_table(rows=1, cols=2).cell(0, 1).text = "Вложенный текст"
+    document.add_paragraph("После таблицы")
+    content = BytesIO()
+    document.save(content)
+    file = file_ref(DOCX)
+    store = FakeStore(files=[(file, content.getvalue())])
+
+    result = asyncio.run(run({"file": file.model_dump()}, {}, context(store)))
+
+    assert result.outcome == "ok"
+    assert result.outputs["text"]["text"] == "Перед таблицей\n\tВложенный текст\nПосле таблицы"
+
+
+def test_docx_with_a_damaged_package_structure_records_a_reason(sample_docx):
+    content = BytesIO()
+    with ZipFile(BytesIO(sample_docx)) as original, ZipFile(content, "w") as damaged:
+        for name in original.namelist():
+            damaged.writestr(name, b"<invalid/>" if name == "_rels/.rels" else original.read(name))
+    file = file_ref(DOCX)
+    store = FakeStore(files=[(file, content.getvalue())])
+
+    result = asyncio.run(run({"file": file.model_dump()}, {}, context(store)))
+
+    assert result.outcome == "unreadable"
+    assert "документ повреждён" in result.events[0].data["message"]
 
 
 @pytest.mark.parametrize(
