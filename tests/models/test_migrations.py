@@ -25,6 +25,7 @@ TABLES = {
     "login_sessions",
     "files",
     "cabinet_results",
+    "connections",
 }
 
 

@@ -29,6 +29,9 @@ def test_openapi_describes_every_endpoint(client):
     assert found == {
         ("GET", f"{API}/health"),
         ("GET", f"{API}/blocks"),
+        ("GET", f"{API}/connections"),
+        ("PUT", f"{API}/connections/{{kind}}"),
+        ("DELETE", f"{API}/connections/{{kind}}"),
         ("POST", f"{API}/files"),
         ("GET", f"{API}/files/{{file_id}}/content"),
         ("GET", f"{API}/results"),

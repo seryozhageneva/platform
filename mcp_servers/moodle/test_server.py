@@ -1,14 +1,9 @@
-"""MCP-сервер Moodle на подделке Moodle: без сети и без Docker (задача 23).
-
-Подделка отвечает так же, как Web Services Moodle 5.3 тестового контейнера: ответы сняты
-с него и сокращены. Данные — выдуманные.
-"""
+"""MCP-сервер Moodle на подделке Moodle: без сети и без Docker (задача 23)."""
 
 import asyncio
 import base64
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -16,109 +11,14 @@ from mcp import Client
 
 from mcp_servers.moodle.moodle_api import MAX_FILE_SIZE, MoodleApi, MoodleError
 from mcp_servers.moodle.server import build_server, server_from_env
-
-SITE = "http://moodle.test"
-TOKEN = "0123456789abcdef0123456789abcdef"
-FILES = {
-    "1/work1.pdf": b"%PDF-1.4 work one",
-    "2/work2.docx": b"PK docx work two",
-    "3/solution.py": b"def f(x):\n    return 2 * x + 3\n",
-    "4/draft.pdf": b"%PDF-1.4 draft",
-}
-
-
-def _file(path: str, mimetype: str, site: str = SITE) -> dict[str, Any]:
-    return {
-        "filename": path.split("/")[-1],
-        "filepath": "/",
-        "filesize": len(FILES.get(path, b"")),
-        "fileurl": f"{site}/webservice/pluginfile.php/14/assignsubmission_file/"
-        f"submission_files/{path}",
-        "mimetype": mimetype,
-    }
-
-
-def _submission(number: int, user: int, status: str, files: list[dict]) -> dict[str, Any]:
-    return {
-        "id": number,
-        "userid": user,
-        "status": status,
-        "timemodified": 1794393677,
-        "plugins": [
-            {"type": "file", "name": "File submissions", "fileareas": [
-                {"area": "submission_files", "files": files}
-            ]},
-            {"type": "comments", "name": "Submission comments"},
-        ],
-    }  # fmt: skip
-
-
-SUBMISSIONS = [
-    _submission(1, 4, "submitted", [_file("1/work1.pdf", "application/pdf")]),
-    _submission(
-        2,
-        5,
-        "submitted",
-        [
-            _file(
-                "2/work2.docx",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
-        ],
-    ),
-    _submission(3, 6, "submitted", [_file("3/solution.py", "document/unknown")]),
-    _submission(4, 7, "draft", [_file("4/draft.pdf", "application/pdf")]),
-    _submission(5, 8, "new", []),
-]
-
-
-class FakeMoodle:
-    """Отвечает как Moodle; запоминает, куда и с каким токеном ходили."""
-
-    def __init__(self, submissions: list[dict] | None = None, token: str = TOKEN) -> None:
-        self.submissions = SUBMISSIONS if submissions is None else submissions
-        self.token = token
-        self.requests: list[httpx.Request] = []
-        self.files = dict(FILES)
-
-    def __call__(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        if request.url.host != "moodle.test":
-            return httpx.Response(200, content=b"secret-collector")
-        if request.url.path == "/webservice/rest/server.php":
-            form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
-            if form.get("wstoken") != self.token:
-                return httpx.Response(
-                    200,
-                    json={
-                        "exception": "moodle_exception",
-                        "errorcode": "invalidtoken",
-                        "message": "Invalid token - token not found",
-                    },
-                )
-            if form["wsfunction"] == "mod_assign_get_assignments":
-                return httpx.Response(
-                    200,
-                    json={
-                        "courses": [{"id": 2, "assignments": [{"id": 1, "name": "Контрольная"}]}],
-                        "warnings": [],
-                    },
-                )
-            if form["wsfunction"] == "mod_assign_get_submissions":
-                return httpx.Response(
-                    200,
-                    json={
-                        "assignments": [{"assignmentid": 1, "submissions": self.submissions}],
-                        "warnings": [],
-                    },
-                )
-            return httpx.Response(200, json={"exception": "x", "errorcode": "accessexception"})
-        if request.url.path.startswith("/webservice/pluginfile.php/"):
-            if request.url.params.get("token") != self.token:
-                return httpx.Response(403)
-            key = "/".join(request.url.path.split("/")[-2:])
-            return httpx.Response(200, content=self.files[key])
-        return httpx.Response(404)
+from mcp_servers.moodle.testing import (
+    FILES,
+    SITE,
+    TOKEN,
+    FakeMoodle,
+    make_file,
+    make_submission,
+)
 
 
 def _api(moodle: FakeMoodle, *, token: str = TOKEN) -> Callable[[], MoodleApi]:
@@ -177,7 +77,9 @@ def test_only_submitted_works_with_content_and_no_names():
 
 
 def test_no_submitted_works_is_empty_outcome():
-    moodle = FakeMoodle([_submission(4, 7, "draft", [_file("4/draft.pdf", "application/pdf")])])
+    moodle = FakeMoodle(
+        [make_submission(4, 7, "draft", [make_file("4/draft.pdf", "application/pdf")])]
+    )
     result = _call(_api(moodle))
     assert result.structured_content == {"works": [], "outcome": "empty"}
 
@@ -199,8 +101,8 @@ def test_unknown_assignment_is_error():
 def test_token_is_not_sent_to_another_site():
     moodle = FakeMoodle(
         [
-            _submission(
-                1, 4, "submitted", [_file("1/work1.pdf", "application/pdf", "http://evil.test")]
+            make_submission(
+                1, 4, "submitted", [make_file("1/work1.pdf", "application/pdf", "http://evil.test")]
             )
         ]
     )

@@ -335,8 +335,11 @@ def test_builtin_blocks_load_without_problems():
     """Сторож для всех будущих блоков: каждый блок в `blocks/` обязан загружаться."""
     registry = load_registry(BUILTIN_BLOCKS)
     assert [str(problem) for problem in registry.problems] == []
-    # Без HTTP-подключения реестр загружает только манифест песочницы.
-    assert set(registry.manifests) - set(registry.blocks) == {"check.code_tests"}
+    # Без способов вызова HTTP и MCP реестр загружает только манифесты песочницы и Moodle.
+    assert set(registry.manifests) - set(registry.blocks) == {
+        "check.code_tests",
+        "source.moodle_submissions",
+    }
     assert "source.task_bank" in registry.blocks
 
 
