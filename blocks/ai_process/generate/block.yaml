@@ -1,0 +1,56 @@
+id: ai_process.generate
+version: 0.1.0
+name: ИИ-обработка
+description: Готовит результат по шаблону промпта и схеме. В шаблон можно подставить {data} и {context}.
+author: platform
+category: ai_process
+inputs:
+  - {name: data, title: Исходные данные, type: Data}
+  - {name: context, title: Дополнительные данные, type: Data, required: false}
+outputs:
+  - {name: result, title: Результат, type: Data, from_config: result}
+config:
+  type: object
+  required: [prompt, result]
+  additionalProperties: false
+  properties:
+    prompt: {title: Шаблон промпта, type: string, minLength: 1}
+    result:
+      title: Тип результата
+      type: object
+      required: [type]
+      additionalProperties: false
+      properties:
+        type: {type: string, enum: [Data, Text, Task, Answer]}
+        of: {title: Уточнение для Data, type: string}
+        list: {title: Список, type: boolean, default: false}
+    result_schema:
+      title: Готовая схема результата
+      type: string
+      enum: [lecture_summary, lecture_tasks]
+    model: {title: Модель, type: string}
+  allOf:
+    - if:
+        required: [result_schema]
+        properties:
+          result_schema: {const: lecture_summary}
+      then:
+        properties:
+          result:
+            required: [of]
+            properties:
+              type: {enum: [Data]}
+              of: {enum: [summary]}
+              list: {enum: [false]}
+    - if:
+        required: [result_schema]
+        properties:
+          result_schema: {const: lecture_tasks}
+      then:
+        properties:
+          result:
+            required: [list]
+            properties:
+              type: {enum: [Task]}
+              list: {enum: [true]}
+runtime: {type: python, entrypoint: "blocks.ai_process.generate:run"}
