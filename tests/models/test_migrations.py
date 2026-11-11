@@ -24,6 +24,7 @@ TABLES = {
     "submissions",
     "login_sessions",
     "files",
+    "cabinet_results",
 }
 
 

@@ -3,7 +3,7 @@
 Блок не видит ни слой моделей `backend/llm/`, ни базу, поэтому подделки лежат рядом с
 контрактом: подключить их может и тест ядра, и тест любого блока. Фейковая модель ничего не
 отправляет в сеть — отвечает тем, что заранее написал автор теста, и запоминает, о чём её
-спросили. Подделка хранилища держит задачи и файлы в памяти.
+спросили. Подделка хранилища держит задачи, файлы и опубликованные результаты в памяти.
 
 Это вспомогательный файл: моделей контракта он не меняет.
 """
@@ -16,11 +16,12 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
+from pydantic import JsonValue
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 
 from backend.core.contracts.interfaces import LLMMessage, LLMResponse
-from backend.core.contracts.ports import FileRef, Task
+from backend.core.contracts.ports import FileKind, FileRef, Task
 
 # Ответ, заданный в тесте: текст, данные для ответа по схеме или ошибка, с которой модель «упадёт».
 FakeReply = str | dict[str, Any] | list[Any] | Exception
@@ -119,20 +120,44 @@ def _by_schema(reply: str | dict[str, Any] | list[Any], schema: dict[str, Any]) 
     return data
 
 
+@dataclass(frozen=True)
+class PublishedResult:
+    """Результат, который блок опубликовал через подделку хранилища (ADR 0026)."""
+
+    id: str
+    key: str
+    title: str
+    content: JsonValue
+    student_id: str | None
+
+
 class FakeStore:
-    """Подделка с интерфейсом `PlatformStore`: банк задач и файлы одного преподавателя в памяти.
+    """Подделка с интерфейсом `PlatformStore`: данные одного преподавателя в памяти.
 
     Тест кладёт сюда задачи, которые в платформе были бы подтверждёнными задачами
     преподавателя этого запуска. Ищет так же, как настоящее хранилище: по совпадению условий,
     в том порядке, в каком задачи переданы. Файлы передаются парами «описание — содержимое»
-    и находятся по номеру из описания (ADR 0023).
+    и находятся по номеру из описания (ADR 0023). `students` — номера учеников этого
+    преподавателя: только им можно адресовать результат.
+
+    Записи ведут себя как в настоящем хранилище (ADR 0026): сохранённая задача и файл сразу
+    видны через чтение, результат попадает в `published`, а повтор того же ключа возвращает
+    уже сохранённую запись и второй не создаёт. Одна подделка — это хранилище одного узла
+    одного запуска: настоящее хранилище тоже создаётся на узел, поэтому одинаковые ключи
+    в разных узлах там дают разные записи, а в общей подделке — одну.
     """
 
     def __init__(
-        self, tasks: Iterable[Task] = (), files: Iterable[tuple[FileRef, bytes]] = ()
+        self,
+        tasks: Iterable[Task] = (),
+        files: Iterable[tuple[FileRef, bytes]] = (),
+        students: Iterable[str] = (),
     ) -> None:
         self.tasks = list(tasks)
         self.files = {ref.id: (ref, content) for ref, content in files}
+        self.students = set(students)
+        self.published: list[PublishedResult] = []
+        self._written: dict[tuple[str, str], Any] = {}
 
     async def find_tasks(
         self,
@@ -159,3 +184,42 @@ class FakeStore:
     async def read_file(self, file_id: str) -> bytes | None:
         found = self.files.get(file_id)
         return None if found is None else found[1]
+
+    async def save_task(self, task: Task, *, key: str) -> Task:
+        if ("task", key) not in self._written:
+            saved = task.model_copy(update={"id": f"saved-task-{len(self._written) + 1}"})
+            self.tasks.append(saved)
+            self._written["task", key] = saved
+        return self._written["task", key]
+
+    async def save_file(
+        self, *, key: str, name: str, kind: FileKind, media_type: str, content: bytes
+    ) -> FileRef:
+        if ("file", key) not in self._written:
+            ref = FileRef(
+                id=f"saved-file-{len(self._written) + 1}",
+                name=name,
+                kind=kind,
+                media_type=media_type,
+                size=len(content),
+            )
+            self.files[ref.id] = (ref, content)
+            self._written["file", key] = ref
+        return self._written["file", key]
+
+    async def publish_result(
+        self, *, key: str, title: str, content: JsonValue, student_id: str | None = None
+    ) -> str:
+        if student_id is not None and student_id not in self.students:
+            raise ValueError("ученик не найден")
+        if ("result", key) not in self._written:
+            result = PublishedResult(
+                id=f"result-{len(self._written) + 1}",
+                key=key,
+                title=title,
+                content=content,
+                student_id=student_id,
+            )
+            self.published.append(result)
+            self._written["result", key] = result
+        return self._written["result", key].id

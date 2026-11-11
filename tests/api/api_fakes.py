@@ -60,6 +60,18 @@ async def run(inputs, config, context):
     return Done(events=[BlockEvent(type="tasks_seen", data={"ids": [task.id for task in tasks]})])
 """
 
+PUBLISH = """
+from backend.core.contracts.run import BlockEvent, Done
+
+
+async def run(inputs, config, context):
+    text = inputs["text"]["text"]
+    first = await context.store.publish_result(key="итог", title="Итог", content={"text": text})
+    # Повтор с тем же ключом, как после сбоя: вторая запись не появляется.
+    again = await context.store.publish_result(key="итог", title="Итог", content={"text": "x"})
+    return Done(events=[BlockEvent(type="published", data={"ids": [first, again]})])
+"""
+
 BROKEN = """
 async def run(inputs, config, context):
     raise RuntimeError("модель недоступна")
@@ -81,6 +93,8 @@ FAKE_BLOCKS: dict[str, tuple[str | None, dict[str, Any]]] = {
     "ai_process.fake_ask": (ASK, {"inputs": [TEXT], "outputs": [TEXT]}),
     # Читает банк через хранилище платформы и пишет в журнал, какие задачи увидел.
     "source.fake_bank": (BANK, {}),
+    # Публикует результат в кабинет через хранилище платформы (ADR 0026).
+    "sink.fake_publish": (PUBLISH, {"inputs": [TEXT]}),
     "transform.fake_broken": (BROKEN, {"inputs": [TEXT], "outputs": [TEXT]}),
     # Блок-обёртка над MCP-инструментом: MCP-клиента ещё нет, вызвать его нечем.
     "sink.fake_mail": (
