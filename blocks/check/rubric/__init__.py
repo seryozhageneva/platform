@@ -17,19 +17,21 @@ class Grade(Strict):
     comment: str = Field(min_length=1, max_length=1500)
 
 
-def _work_text(work: Any, task: Task | None) -> str:
+def _work_text(work: Any, task: Task | None) -> tuple[str, str | None]:
+    task_id = task.id if task is not None else None
     if isinstance(work, str):
         text = work
     elif isinstance(work, dict) and "task_id" in work:
         answer = Answer.model_validate(work)
-        if task is not None and answer.task_id != task.id:
+        if task_id is not None and answer.task_id != task_id:
             raise ValueError("ответ относится к другой задаче")
         text = answer.text
+        task_id = answer.task_id
     else:
         text = Text.model_validate(work).text
     if not text or not text.strip():
         raise ValueError("для проверки по рубрике нужен текст работы")
-    return text
+    return text, task_id
 
 
 async def run(inputs: dict[str, Any], config: dict[str, Any], context: RunContext) -> Done:
@@ -39,7 +41,7 @@ async def run(inputs: dict[str, Any], config: dict[str, Any], context: RunContex
     rubric = task.rubric if task is not None else config.get("rubric")
     if not rubric or not rubric.strip():
         raise ValueError("для проверки нужна рубрика")
-    work = _work_text(inputs["work"], task)
+    work, task_id = _work_text(inputs["work"], task)
     assignment = {"rubric": rubric}
     if task is not None:
         assignment["statement"] = task.statement
@@ -70,7 +72,7 @@ async def run(inputs: dict[str, Any], config: dict[str, Any], context: RunContex
     correct = grade.score == grade.max_score
     verdict = Verdict(
         correct=correct,
-        task_id=task.id if task is not None else None,
+        task_id=task_id,
         score=grade.score,
         max_score=grade.max_score,
         comment=comment,

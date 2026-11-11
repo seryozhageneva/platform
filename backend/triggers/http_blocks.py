@@ -10,7 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 from backend.core.contracts.manifest import HttpRuntime, Manifest
 from backend.core.contracts.run import BlockRun, RunContext, RunRequest, RunResult
 
-HTTP_BLOCK_TIMEOUT = 180
+HTTP_BLOCK_TIMEOUT = 240
 _RESULT = TypeAdapter(RunResult)
 
 

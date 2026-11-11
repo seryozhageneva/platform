@@ -15,9 +15,13 @@ from services.sandbox.runner import OUTPUT_LIMIT, SandboxError, execute
 MANIFEST = load_manifest(
     Path(__file__).resolve().parents[2] / "blocks" / "check" / "code_tests" / "block.yaml"
 )
-MAX_REQUEST_BYTES = 512 * 1024
+# Поле Task.tests содержит JSON-строку внутри JSON запроса. Восемь тестов
+# по 32 КиБ на вход и выход должны помещаться даже после двойного экранирования.
+MAX_REQUEST_BYTES = 4 * 1024 * 1024
 MAX_CODE_BYTES = 32 * 1024
 MAX_TESTS = 8
+MAX_WAITING = 8
+SLOT_TIMEOUT = 60
 
 
 class CodeTest(Strict):
@@ -43,6 +47,7 @@ _TESTS = TypeAdapter(list[CodeTest])
 def create_app() -> FastAPI:
     app = FastAPI(title="Песочница Python")
     slots = asyncio.Semaphore(2)
+    waiting = 0
 
     @app.get("/manifest")
     async def manifest() -> dict:
@@ -50,6 +55,10 @@ def create_app() -> FastAPI:
 
     @app.post("/run")
     async def run(request: Request) -> Done:
+        nonlocal waiting
+        media_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
+        if media_type != "application/json":
+            raise HTTPException(415, "Ожидается application/json")
         body = bytearray()
         async for chunk in request.stream():
             if len(body) + len(chunk) > MAX_REQUEST_BYTES:
@@ -67,13 +76,22 @@ def create_app() -> FastAPI:
             raise HTTPException(422, f"Нужна задача на код с 1–{MAX_TESTS} тестами")
         if answer.task_id != task.id:
             raise HTTPException(422, "Ответ относится к другой задаче")
-        if slots.locked():
+        if waiting >= MAX_WAITING:
             raise HTTPException(503, "Песочница занята")
-        async with slots:
-            try:
-                return await _grade(task.id, answer, tests, limits)
-            except SandboxError:
-                raise HTTPException(503, "Песочница не смогла запустить тесты") from None
+        waiting += 1
+        try:
+            async with asyncio.timeout(SLOT_TIMEOUT):
+                await slots.acquire()
+        except TimeoutError:
+            raise HTTPException(503, "Песочница занята") from None
+        finally:
+            waiting -= 1
+        try:
+            return await _grade(task.id, answer, tests, limits)
+        except SandboxError:
+            raise HTTPException(503, "Песочница не смогла запустить тесты") from None
+        finally:
+            slots.release()
 
     return app
 

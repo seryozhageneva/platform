@@ -1,5 +1,7 @@
+import asyncio
 import json
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -82,6 +84,62 @@ def test_bad_test_format_and_invalid_limits_fail_before_execution(monkeypatch):
     assert client.post("/run", json=payload).status_code == 422
 
 
+def test_all_eight_tests_fit_at_the_byte_limit(monkeypatch):
+    data = "\x00" * app.OUTPUT_LIMIT
+    calls = 0
+
+    async def execute(_code, stdin, **_limits):
+        nonlocal calls
+        calls += 1
+        assert stdin == data
+        return Execution(stdout=data.encode())
+
+    monkeypatch.setattr(app, "execute", execute)
+    payload = request_data()
+    payload["inputs"]["task"]["tests"] = json.dumps(
+        [{"stdin": data, "stdout": data}] * app.MAX_TESTS
+    )
+    response = TestClient(app.create_app()).post("/run", json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "correct"
+    assert calls == app.MAX_TESTS
+
+
+def test_third_concurrent_request_waits_for_a_slot(monkeypatch):
+    async def check():
+        started = 0
+        two_running = asyncio.Event()
+        release = asyncio.Event()
+
+        async def execute(_code, stdin, **_limits):
+            nonlocal started
+            if stdin == "1\n":
+                started += 1
+                if started == 2:
+                    two_running.set()
+                await release.wait()
+            return Execution(stdout=stdin.encode())
+
+        monkeypatch.setattr(app, "execute", execute)
+        transport = httpx.ASGITransport(app=app.create_app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            async with asyncio.timeout(3):
+                first = asyncio.create_task(client.post("/run", json=request_data()))
+                second = asyncio.create_task(client.post("/run", json=request_data()))
+                await two_running.wait()
+                third = asyncio.create_task(client.post("/run", json=request_data()))
+                try:
+                    done, _ = await asyncio.wait({third}, timeout=0.02)
+                    assert not done and started == 2
+                finally:
+                    release.set()
+                responses = await asyncio.gather(first, second, third)
+        assert [response.status_code for response in responses] == [200, 200, 200]
+        assert started == 3
+
+    asyncio.run(check())
+
+
 def test_infrastructure_error_and_oversized_request_are_http_errors(monkeypatch):
     async def execute(*_args, **_kwargs):
         raise SandboxError("приватный текст сбоя")
@@ -91,4 +149,18 @@ def test_infrastructure_error_and_oversized_request_are_http_errors(monkeypatch)
     response = client.post("/run", json=request_data())
     assert response.status_code == 503
     assert "приватный текст" not in response.text
-    assert client.post("/run", content=b"x" * (app.MAX_REQUEST_BYTES + 1)).status_code == 413
+    assert (
+        client.post(
+            "/run",
+            content=b"x" * (app.MAX_REQUEST_BYTES + 1),
+            headers={"content-type": "application/json"},
+        ).status_code
+        == 413
+    )
+
+
+def test_run_rejects_plain_text_even_if_it_contains_json():
+    response = TestClient(app.create_app()).post(
+        "/run", content=json.dumps(request_data()), headers={"content-type": "text/plain"}
+    )
+    assert response.status_code == 415

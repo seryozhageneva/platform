@@ -19,7 +19,10 @@ from services.sandbox import app as sandbox
 from services.sandbox.runner import Execution
 
 
-def graph(block, form, task_id):
+def graph(block, form, task_id, rubric):
+    grade_inputs = {"answer" if form == "code" else "work": "show.answer"}
+    if rubric is None:
+        grade_inputs["task"] = "pick.task"
     return {
         "format": 1,
         "id": "grading_lesson",
@@ -44,10 +47,8 @@ def graph(block, form, task_id):
                 "id": "grade",
                 "type": "block",
                 "block": block,
-                "inputs": {
-                    "task": "pick.task",
-                    "answer" if form == "code" else "work": "show.answer",
-                },
+                "inputs": grade_inputs,
+                "config": {"rubric": rubric} if rubric is not None else {},
             },
         ],
         "transitions": [
@@ -65,8 +66,11 @@ def post(client, path, body=None, status=200):
     return response.json()
 
 
-@pytest.mark.parametrize("form", ["text", "code"])
-def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, form):
+@pytest.mark.parametrize("mode", ["rubric_task", "rubric_config", "code"])
+def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, mode):
+    form = "code" if mode == "code" else "text"
+    rubric = "1 балл за объяснение сложения."
+
     async def execute(code, stdin, *, seconds, memory_mb):
         assert stdin == "2 3\n"
         return Execution(stdout=b"5\n" if "sum" in code else b"0\n")
@@ -108,14 +112,17 @@ def test_lesson_grades_and_keeps_both_attempts(sessions, teacher, monkeypatch, f
                     if form == "code"
                     else {
                         "check_method": "long_answer",
-                        "rubric": "1 балл за объяснение сложения.",
+                        "rubric": rubric,
                     }
                 ),
             },
             status=201,
         )
         block = "check.code_tests" if form == "code" else "check.rubric"
-        pipeline = post(instructor, "/pipelines", graph(block, form, task["id"]), status=201)
+        configured_rubric = rubric if mode == "rubric_config" else None
+        pipeline = post(
+            instructor, "/pipelines", graph(block, form, task["id"], configured_rubric), status=201
+        )
         lesson = post(
             instructor,
             "/assignments",
