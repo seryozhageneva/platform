@@ -118,6 +118,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/files/{file_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Скачать свой файл */
+        get: operations["download_file_api_v1_files__file_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -182,6 +199,23 @@ export interface paths {
         put?: never;
         /** Запустить пайплайн вручную */
         post: operations["launch_manually_api_v1_pipelines__pipeline_id__runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Результаты в кабинете преподавателя, новые первыми */
+        get: operations["list_teacher_results_api_v1_results_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -301,6 +335,23 @@ export interface paths {
         put?: never;
         /** Ответить или попросить подсказку */
         post: operations["respond_to_lesson_api_v1_student_lessons__lesson_id__responses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/student/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Результаты, адресованные ученику, новые первыми */
+        get: operations["list_student_results_api_v1_student_results_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -507,6 +558,34 @@ export interface components {
             transitions: components["schemas"]["Transition"][];
         };
         /**
+         * CabinetResultOut
+         * @description Результат в кабинете преподавателя; если он адресован ученику — кому именно.
+         */
+        CabinetResultOut: {
+            content: components["schemas"]["JsonValue"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Student Id */
+            student_id: string | null;
+            /** Student Name */
+            student_name: string | null;
+            /** Title */
+            title: string;
+        };
+        /**
          * Category
          * @description Семь категорий блоков. Триггер — узел ядра, манифеста у него нет.
          * @enum {string}
@@ -649,6 +728,7 @@ export interface components {
             title: string;
             type: components["schemas"]["PortType"];
         };
+        JsonValue: unknown;
         /**
          * Launch
          * @description Один способ запуска пайплайна.
@@ -1029,6 +1109,25 @@ export interface components {
             link_expires_at: string | null;
             /** Name */
             name: string;
+        };
+        /**
+         * StudentResultOut
+         * @description Результат в кабинете ученика: что блок-получатель адресовал этому ученику.
+         */
+        StudentResultOut: {
+            content: components["schemas"]["JsonValue"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
         };
         /**
          * SwitchNode
@@ -1716,6 +1815,75 @@ export interface operations {
             };
         };
     };
+    download_file_api_v1_files__file_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Expected-Account"?: string | null;
+            };
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Файл */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     health_api_v1_health_get: {
         parameters: {
             query?: never;
@@ -2091,6 +2259,73 @@ export interface operations {
             };
             /** @description Очередь запусков недоступна */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_teacher_results_api_v1_results_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Expected-Account"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CabinetResultOut"][];
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2605,6 +2840,73 @@ export interface operations {
             };
             /** @description Сервер уроков занят */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_student_results_api_v1_student_results_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Expected-Account": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentResultOut"][];
+                };
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

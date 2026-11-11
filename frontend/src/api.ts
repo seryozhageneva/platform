@@ -14,6 +14,8 @@ export type Pipeline = components["schemas"]["Pipeline"];
 export type PipelineSummary = components["schemas"]["PipelineSummary"];
 export type Problem = components["schemas"]["ProblemOut"];
 export type RunSummary = components["schemas"]["RunSummary"];
+export type CabinetResult = components["schemas"]["CabinetResultOut"];
+export type StudentResult = components["schemas"]["StudentResultOut"];
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly problems: Problem[] = []) {
@@ -87,6 +89,14 @@ export const api = {
   },
   async tasks(accountId: string) {
     return checked(await client.GET("/api/v1/tasks", { params: { header: account(accountId) } }));
+  },
+  async teacherResults(accountId: string) {
+    return checked(await client.GET("/api/v1/results", { params: { header: account(accountId) } }));
+  },
+  async studentResults(accountId: string) {
+    return checked(await client.GET("/api/v1/student/results", {
+      params: { header: account(accountId) },
+    }));
   },
   async students(accountId: string) {
     return checked(await client.GET("/api/v1/students", { params: { header: account(accountId) } }));

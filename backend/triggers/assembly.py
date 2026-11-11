@@ -25,6 +25,7 @@ from backend.core.registry import BUILTIN_BLOCKS, Registry, load_registry
 from backend.llm.factory import make_llm
 from backend.models.assignments import AssignmentRepository
 from backend.models.auth import AuthRepository
+from backend.models.cabinet import CabinetResultRepository
 from backend.models.db import Sessions, make_engine, make_sessions
 from backend.models.files import FileRepository
 from backend.models.llm_calls import LLMCallRepository
@@ -57,6 +58,7 @@ class Assembly:
         self.pipelines = PipelineRepository(sessions)
         self.tasks = TaskRepository(sessions)
         self.files = FileRepository(sessions)
+        self.results = CabinetResultRepository(sessions)
         self.runs = PgRunStore(sessions)
         self.submissions = SubmissionRepository(sessions)
         self._llm = llm

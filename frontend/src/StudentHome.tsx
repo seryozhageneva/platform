@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiError, errorMessage } from "./api";
 import type { Lesson, LessonResponse, LessonState } from "./api";
+import { CabinetResults } from "./CabinetResults";
 
 export function StudentHome({ accountId, onSessionChange }: {
   accountId: string;
@@ -60,42 +61,46 @@ export function StudentHome({ accountId, onSessionChange }: {
   const screen = lesson?.screen;
 
   return (
-    <section>
-      <h2>Мои уроки</h2>
-      {error && <p role="alert">{error}</p>}
-      {busy && <p role="status">Загружаем уроки…</p>}
-      {!busy && !error && lessons.length === 0 && <p>Вам пока не назначили уроки.</p>}
-      {!selected && (
-        <ul>
-          {lessons.map((item) => (
-            <li key={item.id}>
-              <button type="button" disabled={busy} onClick={() => void change(item)}>{item.name}</button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {selected && (
-        <>
-          <h3>{selected.name}</h3>
-          <button type="button" disabled={busy} onClick={() => { setSelected(null); setLesson(null); setError(""); }}>
-            К списку уроков
-          </button>
-          {screen && (
-            <AnswerScreen key={screen.revision} screen={screen} busy={busy}
-              respond={(response) => void change(selected, {
-                node_id: screen.node_id, revision: screen.revision, response,
-              })}
-            />
-          )}
-          {lesson?.status === "done" && <p role="status">Урок завершён.</p>}
-          {lesson?.status === "error" && <p role="alert">Урок остановился из-за ошибки. Сообщите преподавателю.</p>}
-          {lesson?.status === "waiting" && !screen && <p>Этот шаг урока сейчас недоступен в кабинете.</p>}
-          {(!lesson || lesson.status === "running" || (lesson.status === "waiting" && !screen)) && !busy && (
-            <button type="button" onClick={() => void change(selected)}>Обновить урок</button>
-          )}
-        </>
-      )}
-    </section>
+    <>
+      <section>
+        <h2>Мои уроки</h2>
+        {error && <p role="alert">{error}</p>}
+        {busy && <p role="status">Загружаем уроки…</p>}
+        {!busy && !error && lessons.length === 0 && <p>Вам пока не назначили уроки.</p>}
+        {!selected && (
+          <ul>
+            {lessons.map((item) => (
+              <li key={item.id}>
+                <button type="button" disabled={busy} onClick={() => void change(item)}>{item.name}</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {selected && (
+          <>
+            <h3>{selected.name}</h3>
+            <button type="button" disabled={busy} onClick={() => { setSelected(null); setLesson(null); setError(""); }}>
+              К списку уроков
+            </button>
+            {screen && (
+              <AnswerScreen key={screen.revision} screen={screen} busy={busy}
+                respond={(response) => void change(selected, {
+                  node_id: screen.node_id, revision: screen.revision, response,
+                })}
+              />
+            )}
+            {lesson?.status === "done" && <p role="status">Урок завершён.</p>}
+            {lesson?.status === "error" && <p role="alert">Урок остановился из-за ошибки. Сообщите преподавателю.</p>}
+            {lesson?.status === "waiting" && !screen && <p>Этот шаг урока сейчас недоступен в кабинете.</p>}
+            {(!lesson || lesson.status === "running" || (lesson.status === "waiting" && !screen)) && !busy && (
+              <button type="button" onClick={() => void change(selected)}>Обновить урок</button>
+            )}
+          </>
+        )}
+      </section>
+      {/* Список перечитывается при возврате к урокам: итог только что пройденного урока виден сразу. */}
+      {!selected && <CabinetResults accountId={accountId} who="student" onSessionChange={onSessionChange} />}
+    </>
   );
 }
 

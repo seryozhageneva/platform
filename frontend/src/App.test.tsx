@@ -11,6 +11,7 @@ vi.mock("./api", async (importOriginal) => {
       me: vi.fn(), teacher: vi.fn(), student: vi.fn(), logout: vi.fn(),
       tasks: vi.fn(), students: vi.fn(), createStudent: vi.fn(),
       issueLink: vi.fn(), revokeLink: vi.fn(), lessons: vi.fn(), pipelines: vi.fn(), runs: vi.fn(),
+      teacherResults: vi.fn(), studentResults: vi.fn(),
     },
   };
 });
@@ -24,7 +25,8 @@ beforeEach(() => {
   vi.mocked(api.lessons).mockResolvedValue([]);
   vi.mocked(api.pipelines).mockResolvedValue([]);
   vi.mocked(api.runs).mockResolvedValue([]);
-
+  vi.mocked(api.teacherResults).mockResolvedValue([]);
+  vi.mocked(api.studentResults).mockResolvedValue([]);
 });
 
 afterEach(cleanup);

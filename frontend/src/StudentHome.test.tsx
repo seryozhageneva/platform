@@ -1,14 +1,15 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api, ApiError } from "./api";
 import type { LessonState } from "./api";
 import { StudentHome } from "./StudentHome";
 
 vi.mock("./api", async (importOriginal) => ({
   ...await importOriginal<typeof import("./api")>(),
-  api: { lessons: vi.fn(), openLesson: vi.fn(), respondToLesson: vi.fn() },
+  api: { lessons: vi.fn(), openLesson: vi.fn(), respondToLesson: vi.fn(), studentResults: vi.fn() },
 }));
 
+beforeEach(() => { vi.mocked(api.studentResults).mockResolvedValue([]); });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 it("показывает урок, перечитывает подсказку после конфликта и отправляет формулу", async () => {

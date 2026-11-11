@@ -1,9 +1,12 @@
-"""Загрузка документов преподавателем (ADR 0023)."""
+"""Загрузка документов преподавателем (ADR 0023) и скачивание своих файлов (ADR 0027)."""
 
+import re
+from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 
 from backend.api.deps import REFUSALS, Assembled, Teacher
 from backend.api.errors import ApiError
@@ -76,3 +79,25 @@ async def upload_file(
         content=bytes(content),
     )
     return as_contract(row)
+
+
+@router.get(
+    "/{file_id}/content",
+    summary="Скачать свой файл",
+    response_class=Response,
+    responses={200: {"content": {"application/octet-stream": {}}, "description": "Файл"}},
+)
+async def download_file(file_id: UUID, teacher: Teacher, assembly: Assembled) -> Response:
+    row = await assembly.files.get(teacher.id, file_id)
+    content = None if row is None else await assembly.files.read(teacher.id, file_id)
+    if row is None or content is None:
+        raise ApiError(404, "файл не найден")
+    # Файл всегда скачивается, а не открывается на странице платформы: так файл любого типа
+    # не сможет выполнить свой код от имени сайта. Для старых браузеров — имя латиницей.
+    fallback = "file" + re.sub(r"[^A-Za-z0-9.]", "", Path(row.name).suffix)[:10]
+    disposition = f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(row.name)}"
+    return Response(
+        content,
+        media_type=row.media_type,
+        headers={"Content-Disposition": disposition, "X-Content-Type-Options": "nosniff"},
+    )
