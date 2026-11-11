@@ -26,7 +26,10 @@ READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempot
 
 
 class WorkFile(BaseModel):
-    """Файл сданной работы. Имени студента нет — только его номер в Moodle в `meta`."""
+    """Файл сданной работы. Имени из профиля студента нет — только номер в Moodle в `meta`.
+
+    Имя файла и содержимое приходят как есть: в них студент мог написать свою фамилию.
+    """
 
     name: str
     kind: Literal["document", "code", "image", "other"]
