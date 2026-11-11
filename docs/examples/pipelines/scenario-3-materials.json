@@ -33,8 +33,9 @@
       "block": "ai_process.generate",
       "title": "Сделать конспект",
       "config": {
-        "prompt": "Составь конспект лекции и список ключевых понятий.",
-        "result": {"type": "Data", "of": "summary"}
+        "prompt": "Составь краткий конспект и список ключевых понятий. В конспекте изложи правила расчёта и приведи пример из лекции. Используй сведения из лекции.\n\n{data}",
+        "result": {"type": "Data", "of": "summary"},
+        "result_schema": "lecture_summary"
       },
       "inputs": {"data": "extract.text"}
     },
@@ -52,8 +53,9 @@
       "block": "ai_process.generate",
       "title": "Сгенерировать задачи",
       "config": {
-        "prompt": "Составь задачи по лекции с эталонными ответами и решениями.",
-        "result": {"type": "Task", "list": true}
+        "prompt": "Составь две разные задачи по лекции, каждая с одним числовым ответом. В answer запиши только точное число или дробь вида 17/3, без округления, единиц измерения и пояснений. В solution приведи ход решения. Задай каждой задаче свой id и выбери short_answer как способ проверки.\n\nЛекция: {data}\n\nКонспект: {context}",
+        "result": {"type": "Task", "list": true},
+        "result_schema": "lecture_tasks"
       },
       "inputs": {"data": "extract.text", "context": "summarize.result"}
     },
