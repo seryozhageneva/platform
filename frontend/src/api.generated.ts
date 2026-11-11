@@ -648,7 +648,7 @@ export interface components {
         };
         /**
          * ConnectionKind
-         * @description К какой внешней системе подключение; остальные виды добавят задачи 27 и 30.
+         * @description К какой внешней системе подключение; остальные виды добавят задачи 26 и 29.
          * @enum {string}
          */
         ConnectionKind: "moodle";

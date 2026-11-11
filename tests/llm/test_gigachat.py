@@ -173,7 +173,7 @@ def test_empty_reply_is_an_error():
 
 
 def test_files_are_not_supported_yet():
-    """Фото и документы в запросе — задача 31; пока это честный отказ, а не молчание."""
+    """Фото и документы в запросе — задача 30; пока это честный отказ, а не молчание."""
     photo = FileRef(id="f1", name="solution.jpg", kind=FileKind.IMAGE, media_type="image/jpeg")
     made, client = provider(completion())
 

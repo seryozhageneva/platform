@@ -114,7 +114,7 @@ def test_block_gets_run_details_in_context(store, blocks, pipeline, calls):
     assert context.attempt == 1
     assert context.shown is None and context.human_response is None
     assert context.llm is model
-    # MCP-инструменты движок блоку пока не выдаёт (задачи 23 и 29).
+    # MCP-инструменты движок блоку пока не выдаёт (задачи 23 и 28).
     assert context.tools is None
 
 

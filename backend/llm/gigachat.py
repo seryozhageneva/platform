@@ -54,7 +54,7 @@ class GigaChatProvider:
     async def chat(self, messages: list[LLMMessage], *, model: str | None = None) -> ProviderReply:
         if any(message.files for message in messages):
             raise LLMError(
-                "unsupported", "файлы в запросе к GigaChat пока не поддерживаются (задача 31)"
+                "unsupported", "файлы в запросе к GigaChat пока не поддерживаются (задача 30)"
             )
         payload = Chat(
             model=model or self.model,
