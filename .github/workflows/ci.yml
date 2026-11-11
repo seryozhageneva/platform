@@ -31,7 +31,11 @@ jobs:
         run: docker compose up -d --wait postgres redis
       - name: Применить миграции на чистой базе
         run: uv run alembic upgrade head
+      - name: Собрать образ для проверки изоляции
+        run: docker build -t platform-code-runner:local services/sandbox
       - name: Тесты
+        env:
+          PLATFORM_TEST_DOCKER: "1"
         run: uv run pytest
       - name: Остановить базу
         if: always()

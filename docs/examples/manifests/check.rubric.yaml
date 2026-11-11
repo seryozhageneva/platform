@@ -1,4 +1,3 @@
-# Черновик: описание блока без кода.
 id: check.rubric
 version: 0.1.0
 name: "Проверка: по рубрике с помощью ИИ"
@@ -16,7 +15,7 @@ outputs:
 config:
   type: object
   properties:
-    rubric: {title: Критерии оценки, type: string}
+    rubric: {title: Критерии оценки, type: string, minLength: 1}
     model: {title: Модель, type: string}
 outcomes: [correct, wrong]
 runtime: {type: python, entrypoint: "blocks.check.rubric:run"}

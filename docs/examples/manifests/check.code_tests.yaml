@@ -3,7 +3,7 @@ id: check.code_tests
 version: 0.1.0
 name: "Проверка: тесты кода в песочнице"
 description: >-
-  Запускает код ученика в изолированном контейнере на тестах, записанных в задаче,
+  Запускает Python-код ученика в изолированных контейнерах на тестах из задачи
   и выносит вердикт.
 author: platform
 category: check
@@ -24,24 +24,26 @@ outputs:
 
 config:
   type: object
+  additionalProperties: false
   properties:
     time_limit_seconds:
       title: Лимит времени на один тест, секунд
       type: integer
       minimum: 1
+      maximum: 5
       default: 5
     memory_limit_mb:
       title: Лимит памяти, мегабайт
       type: integer
       minimum: 16
+      maximum: 256
       default: 128
 
 outcomes: [correct, wrong]
 
 # Сервис отвечает на GET /manifest (этим же манифестом) и POST /run.
-# Здесь имя сервиса из docker-compose, а не адрес в интернете.
 runtime:
   type: http
-  url: http://sandbox:8000
+  url: http://127.0.0.1:8001
 
 side_effects: false

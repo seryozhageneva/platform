@@ -22,6 +22,16 @@ button:disabled { opacity: .55; cursor: default; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.lesson-answer, .lesson-code {
+  box-sizing: border-box;
+  width: 100%;
+  padding: .45rem .65rem;
+  border: 1px solid #64748b;
+  border-radius: .35rem;
+  font: inherit;
+  resize: vertical;
+}
+.lesson-code { font-family: ui-monospace, monospace; tab-size: 4; }
 
 main:has(.pipeline-workspace) { width: min(100rem, calc(100% - 2rem)); }
 .pipeline-editor { border: 0; margin: 0; padding: 0; min-width: 0; }

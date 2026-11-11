@@ -6,12 +6,52 @@
 """
 
 import uuid
+from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.contracts.ports import Answer
+from backend.core.contracts.ports import Answer, Verdict
 from backend.models.db import Sessions
-from backend.models.tables import SubmissionRow, SubmissionSource
+from backend.models.tables import SubmissionRow, SubmissionSource, VerdictStatus
+
+
+@dataclass(frozen=True)
+class SubmissionGrade:
+    owner_id: uuid.UUID
+    run_id: uuid.UUID
+    answer: Answer
+    verdict: Verdict
+
+    async def save(self, session: AsyncSession) -> None:
+        """Оценка относится к последней сдаче этого ответа в текущем уроке."""
+        answer = self.answer
+        query = (
+            select(SubmissionRow)
+            .where(
+                SubmissionRow.owner_id == self.owner_id,
+                SubmissionRow.run_id == self.run_id,
+                SubmissionRow.source == SubmissionSource.PLATFORM,
+                SubmissionRow.task_id == answer.task_id,
+                SubmissionRow.form == answer.form,
+                SubmissionRow.text == answer.text,
+                SubmissionRow.file
+                == (answer.file.model_dump(mode="json") if answer.file is not None else None),
+            )
+            .order_by(SubmissionRow.created_at.desc(), SubmissionRow.id.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        row = await session.scalar(query)
+        if row is None or row.verdict_status is not None:
+            return
+        verdict = self.verdict
+        row.score = verdict.score
+        row.max_score = verdict.max_score
+        row.comment = verdict.comment
+        row.verdict_status = (
+            VerdictStatus.PRELIMINARY if verdict.preliminary else VerdictStatus.CONFIRMED
+        )
 
 
 class SubmissionRepository:

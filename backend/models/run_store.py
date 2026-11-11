@@ -16,6 +16,7 @@ from backend.core.contracts.run import BlockEvent
 from backend.core.contracts.screens import ScreenType
 from backend.core.contracts.state import RunState, RunStatus
 from backend.models.db import Sessions, advisory_key
+from backend.models.submissions import SubmissionGrade
 from backend.models.tables import (
     ApprovalRow,
     EventRow,
@@ -43,6 +44,7 @@ class PgRunStore:
         self._sessions = sessions
         self._assignment_id = assignment_id
         self._pending_submissions: list[SubmissionRow] = []
+        self._pending_grade: SubmissionGrade | None = None
         self._pending_decision: tuple[uuid.UUID, str, dict[str, Any]] | None = None
 
     def stage_approval(
@@ -53,6 +55,9 @@ class PgRunStore:
     def stage_submission(self, row: SubmissionRow) -> None:
         """Работы сохранятся с успешным шагом, который принял ответы."""
         self._pending_submissions.append(row)
+
+    def stage_grade(self, grade: SubmissionGrade) -> None:
+        self._pending_grade = grade
 
     async def for_teacher(self, teacher_id: uuid.UUID) -> list[dict[str, Any]]:
         waiting_nodes = func.jsonb_path_query_array(
@@ -151,11 +156,14 @@ class PgRunStore:
             index_elements=[RunRow.id], set_={**changing, "updated_at": func.now()}
         )
         pending, self._pending_submissions = self._pending_submissions, []
+        grade, self._pending_grade = self._pending_grade, None
         decision, self._pending_decision = self._pending_decision, None
         async with self._sessions.begin() as session:
             await session.execute(query)
             if state.status is not RunStatus.ERROR:
                 session.add_all(pending)
+                if grade is not None:
+                    await grade.save(session)
                 if decision is not None:
                     approval_id, outcome, response = decision
                     closed = await session.scalar(
