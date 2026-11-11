@@ -25,6 +25,8 @@ dependencies = [
     "pypdf>=7.0.1",
     "python-docx>=1.2",
     "fpdf2>=2.8",
+    "mcp>=1.20",
+    "cryptography>=44",
 ]
 
 [tool.uv]
