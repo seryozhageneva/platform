@@ -1,0 +1,66 @@
+# Тестовый Moodle для разработки адаптера Moodle (задача 23, ADR 0028).
+# Отдельный файл, чтобы обычный `docker compose up` и CI его не трогали.
+# Запуск:    docker compose -f docker-compose.moodle.yml up -d --wait   (первый раз — несколько минут)
+# Данные:    uv run python -m experiments.moodle_setup
+# Остановка: docker compose -f docker-compose.moodle.yml down
+# Moodle слушает только этот компьютер (127.0.0.1) и из сети не виден. В нём только
+# выдуманные курс, задание и студенты — настоящих данных здесь не бывает.
+
+name: platform-moodle
+
+services:
+  moodle-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: moodle
+      POSTGRES_DB: moodle
+      POSTGRES_PASSWORD: ${MOODLE_DB_PASSWORD:?Добавь MOODLE_DB_PASSWORD в файл .env, см. .env.example}
+    volumes:
+      - moodle-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U moodle -d moodle"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  moodle:
+    # Образ на Alpine собран и для Apple Silicon (arm64); версия закреплена отпечатком,
+    # чтобы у всех поднимался один и тот же Moodle (ADR 0028).
+    image: erseco/alpine-moodle@sha256:241e6989530c455722e190a019a8fb7632fa33b96e6a84ff4281da939f999200
+    depends_on:
+      moodle-db:
+        condition: service_healthy
+    environment:
+      SITE_URL: http://localhost:8080
+      DB_TYPE: pgsql
+      DB_HOST: moodle-db
+      DB_NAME: moodle
+      DB_USER: moodle
+      DB_PASS: ${MOODLE_DB_PASSWORD:?Добавь MOODLE_DB_PASSWORD в файл .env, см. .env.example}
+      MOODLE_USERNAME: admin
+      MOODLE_PASSWORD: ${MOODLE_ADMIN_PASSWORD:?Добавь MOODLE_ADMIN_PASSWORD в файл .env, см. .env.example}
+      MOODLE_EMAIL: admin@example.test
+      # Без пробелов: скрипт настройки образа не умеет имя с пробелами.
+      MOODLE_SITENAME: Platform_Test_Moodle
+      MOODLE_LANGUAGE: en
+      # Код Moodle не обновляется сам: версия задаётся образом.
+      AUTO_UPDATE_MOODLE: "false"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - moodle-html:/var/www/html
+      - moodle-data:/var/www/moodledata
+    healthcheck:
+      # Moodle готов, когда страница входа отвечает; установка при первом запуске долгая.
+      # Внутри контейнера Moodle перенаправляет на адрес сайта, а он здесь недоступен,
+      # поэтому годится и ответ-перенаправление.
+      test: ["CMD-SHELL", "wget -S -O /dev/null http://127.0.0.1:8080/login/index.php 2>&1 | grep -q 'HTTP/1.1 [23]0'"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+volumes:
+  moodle-db:
+  moodle-html:
+  moodle-data:

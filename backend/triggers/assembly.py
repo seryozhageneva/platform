@@ -26,6 +26,7 @@ from backend.llm.factory import make_llm
 from backend.models.assignments import AssignmentRepository
 from backend.models.auth import AuthRepository
 from backend.models.cabinet import CabinetResultRepository
+from backend.models.connections import ConnectionRepository, SecretBox
 from backend.models.db import Sessions, make_engine, make_sessions
 from backend.models.files import FileRepository
 from backend.models.llm_calls import LLMCallRepository
@@ -36,6 +37,7 @@ from backend.models.submissions import SubmissionGrade, SubmissionRepository
 from backend.models.tasks import TaskRepository
 from backend.models.users import UserRepository
 from backend.triggers.http_blocks import HTTP_BLOCK_TIMEOUT, http_connector
+from backend.triggers.mcp_blocks import connection_tools, mcp_connector
 
 logger = logging.getLogger(__name__)
 _GRADING_INPUTS = {"check.code_tests": "answer", "check.rubric": "work"}
@@ -49,8 +51,11 @@ class Assembly:
         llm: LLMClient | None = None,
         *,
         lock_sessions: Sessions | None = None,
+        connections: ConnectionRepository | None = None,
     ) -> None:
         self.registry = registry
+        # Подключения к внешним системам; None — в .env нет ключа шифрования (ADR 0028).
+        self.connections = connections
         self._sessions = sessions
         self.assignments = AssignmentRepository(sessions, lock_sessions=lock_sessions)
         self.users = UserRepository(sessions)
@@ -218,10 +223,24 @@ async def open_assembly(*, llm: LLMClient | None = None) -> AsyncIterator[Assemb
         http = await resources.enter_async_context(
             httpx.AsyncClient(timeout=httpx.Timeout(HTTP_BLOCK_TIMEOUT, connect=2), trust_env=False)
         )
-        registry = load_registry(
-            BUILTIN_BLOCKS,
-            {"http": http_connector(http, sandbox_url=os.environ.get("PLATFORM_SANDBOX_URL"))},
-        )
+        connectors = {
+            "http": http_connector(http, sandbox_url=os.environ.get("PLATFORM_SANDBOX_URL"))
+        }
+        connections = None
+        try:
+            connections = ConnectionRepository(sessions, SecretBox.from_env())
+        except RuntimeError as error:
+            # Без ключа платформа работает, но подключения и блоки MCP недоступны.
+            logger.warning("подключения недоступны: %s", error)
+        else:
+            connectors["mcp"] = mcp_connector(connection_tools(connections))
+        registry = load_registry(BUILTIN_BLOCKS, connectors)
         for problem in registry.problems:
             logger.warning("блок не загружен: %s", problem)
-        yield Assembly(sessions, registry, llm, lock_sessions=make_sessions(lock_engine))
+        yield Assembly(
+            sessions,
+            registry,
+            llm,
+            lock_sessions=make_sessions(lock_engine),
+            connections=connections,
+        )

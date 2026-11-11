@@ -47,7 +47,7 @@ docker compose up -d --wait      поднять PostgreSQL и Redis и дожд�
 docker compose ps                состояние сервисов
 docker compose down              остановить сервисы (данные базы сохраняются)
 uv run alembic upgrade head      применить миграции к базе (после правки backend/models/tables.py нужна новая миграция)
-uv run pytest                    тесты; тестам базы нужен запущенный PostgreSQL, они идут на отдельной базе platform_test
+uv run pytest                    тесты; тестам базы нужен запущенный PostgreSQL, они идут на отдельной базе platform_test; тест на настоящем Moodle пропускается, если тестовый Moodle не запущен
 uv run ruff format --check .     проверка оформления кода
 uv run ruff check .              линтер
 uv run lint-imports              правила импортов из .importlinter (ADR 0003, 0006)
@@ -56,6 +56,10 @@ uv run python -m experiments.llm_check    ручной вызов настоящ
 uv run python -m backend.api     сервер API на http://127.0.0.1:8000, описание — на странице /docs; нужны база и LLM_PROVIDER в .env (ADR 0013)
 uv run arq backend.triggers.worker.WorkerSettings    рабочий процесс очереди: выполняет ручные запуски; в отдельном терминале рядом с API (ADR 0022)
 uv run python -m experiments.api_check    ручная проверка API с заранее созданной учётной записью demo.teacher@example.test
+docker compose -f docker-compose.moodle.yml up -d --wait    поднять тестовый Moodle на http://localhost:8080 (первый раз — несколько минут; ADR 0028)
+uv run python -m experiments.moodle_setup    наполнить тестовый Moodle выдуманными курсом, заданием и сдачами
+uv run python -m experiments.moodle_check    ручная проверка MCP-сервера Moodle на тестовом Moodle
+docker compose -f docker-compose.moodle.yml down    остановить тестовый Moodle (данные сохраняются)
 pnpm --dir frontend dev          запустить фронтенд и перенаправлять запросы /api на локальный сервер
 pnpm --dir frontend api:generate  обновить типы клиента после изменения API
 pnpm --dir frontend api:check    проверить, что типы клиента совпадают с API

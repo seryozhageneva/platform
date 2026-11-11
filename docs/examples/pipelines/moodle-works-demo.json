@@ -1,0 +1,113 @@
+{
+  "format": 1,
+  "id": "moodle_works_demo",
+  "name": "Работы из Moodle",
+  "params": [
+    {
+      "name": "course_id",
+      "title": "Курс Moodle",
+      "type": "integer"
+    },
+    {
+      "name": "assignment_id",
+      "title": "Задание Moodle",
+      "type": "integer"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "launches": [
+        {
+          "type": "manual"
+        }
+      ],
+      "title": "Преподаватель нажал «Запустить»"
+    },
+    {
+      "id": "get_works",
+      "type": "block",
+      "block": "source.moodle_submissions",
+      "config": {
+        "course_id": {
+          "$param": "course_id"
+        },
+        "assignment_id": {
+          "$param": "assignment_id"
+        }
+      },
+      "inputs": {
+        "event": "start.event"
+      },
+      "title": "Получить сданные работы"
+    },
+    {
+      "id": "each_work",
+      "type": "for_each",
+      "over": "get_works.works",
+      "body": {
+        "start": "by_kind",
+        "nodes": [
+          {
+            "id": "by_kind",
+            "type": "switch",
+            "value": "each_work.item",
+            "field": "kind",
+            "title": "Что сдано: документ или код"
+          },
+          {
+            "id": "extract",
+            "type": "block",
+            "block": "transform.document_to_text",
+            "inputs": {
+              "file": "each_work.item"
+            },
+            "title": "Извлечь текст"
+          }
+        ],
+        "transitions": [
+          {
+            "from": "by_kind",
+            "when": "document",
+            "to": "extract"
+          }
+        ]
+      },
+      "collect": {
+        "work": "each_work.item",
+        "text": "extract.text"
+      },
+      "as": "work_text",
+      "title": "Для каждой работы"
+    },
+    {
+      "id": "show",
+      "type": "block",
+      "block": "sink.cabinet",
+      "config": {
+        "title": "Работы из Moodle"
+      },
+      "inputs": {
+        "content": "each_work.results"
+      },
+      "title": "Показать работы в кабинете"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "start",
+      "to": "get_works"
+    },
+    {
+      "from": "get_works",
+      "when": "ok",
+      "to": "each_work"
+    },
+    {
+      "from": "each_work",
+      "to": "show"
+    }
+  ],
+  "description": "Задача 23: сданные работы задания Moodle попадают в пайплайн, текст документов — в кабинет преподавателя. Код пока только передаётся дальше."
+}

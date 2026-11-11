@@ -9,6 +9,9 @@ from uuid import uuid4
 IMAGE = "platform-code-runner:local"
 OUTPUT_LIMIT = 32 * 1024
 DOCKER_TIMEOUT = 5
+# Код выхода процесса, убитого сигналом KILL (128 + 9): так ядро снимает программу,
+# которая вышла за лимит памяти контейнера.
+KILLED = 137
 
 
 class SandboxError(RuntimeError):
@@ -117,7 +120,11 @@ async def execute(code: str, stdin: str, *, seconds: int, memory_mb: int) -> Exe
         if status == 0:
             return Execution(stdout=stdout)
         state = json.loads(await _control("inspect", "--format={{json .State}}", name))
-        if state["OOMKilled"]:
+        # Отметку OOMKilled Docker ставит отдельным событием, и она может прийти позже, чем
+        # мы читаем состояние. Поэтому смотрим и на код 137 — «убит сигналом KILL». Другого
+        # источника у него нет: наш таймер срабатывает раньше запасного таймера контейнера
+        # и обрабатывается выше, а лимит процессов программу не убивает.
+        if state["OOMKilled"] or status == KILLED or state["ExitCode"] == KILLED:
             return Execution(failure="Превышен лимит памяти.")
         if state["Status"] == "exited" and not state["Error"] and state["ExitCode"] != 0:
             return Execution(failure="Программа завершилась с ошибкой.")

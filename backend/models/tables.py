@@ -2,7 +2,7 @@
 
 Таблицы: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
 запуски, журнал событий, журнал вызовов модели (ADR 0012), работы учеников (ADR 0016),
-файлы (ADR 0023) и результаты кабинета (ADR 0026).
+файлы (ADR 0023), результаты кабинета (ADR 0026) и подключения к внешним системам (ADR 0028).
 Остальные сущности из
 docs/vision.md добавляются миграциями в задачах, где они впервые нужны. После правки этого
 файла нужна новая миграция: тест `tests/models/test_migrations.py` падает, если забыли
@@ -30,6 +30,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -48,6 +49,12 @@ class Role(StrEnum):
 
 class GroupSource(StrEnum):
     PLATFORM = "platform"
+    MOODLE = "moodle"
+
+
+class ConnectionKind(StrEnum):
+    """К какой внешней системе подключение; остальные виды добавят задачи 27 и 30."""
+
     MOODLE = "moodle"
 
 
@@ -413,3 +420,26 @@ class CabinetResultRow(Base):
     title: Mapped[str]
     content: Mapped[JsonValue] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class ConnectionRow(Base):
+    """Подключение преподавателя к внешней системе (ADR 0028): адрес и зашифрованный токен.
+
+    У преподавателя одно подключение каждого вида: блок называет только вид («moodle»), а
+    какой сайт и чей токен — решает подключение того, чей запуск идёт. Токен хранится только
+    зашифрованным ключом из `.env` (`PLATFORM_SECRET_KEY`); открытым текстом его в базе нет.
+    """
+
+    __tablename__ = "connections"
+    __table_args__ = (
+        _one_of("kind", ConnectionKind),
+        UniqueConstraint("owner_id", "kind"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    url: Mapped[str]
+    token_encrypted: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
