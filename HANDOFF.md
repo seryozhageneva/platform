@@ -15,7 +15,8 @@ _Обновлено: 2026-11-11, агент: Claude Code_
 
 ## Сделано в задаче 24b
 
-- Коммиты `5edf417` (задача) и `1e08de7` (отметка в карте); перед ними `bb992e1 Обновить HANDOFF`.
+- Коммиты `5edf417` (задача) и `1e08de7` (отметка в карте); перед ними `bb992e1 Обновить HANDOFF`,
+  после — `Обновить HANDOFF`.
 - Контракт: `StudentResults`, `WorkResult` и `PlatformStore.find_results(since=…)` в
   `backend/core/contracts/interfaces.py`; подделка в `testing.py` (поле `results`).
 - `backend/models/platform_store.py`: ученики преподавателя по алфавиту, работы из
@@ -25,7 +26,7 @@ _Обновлено: 2026-11-11, агент: Claude Code_
   `check.exact` теперь тоже записывается рядом с работой (раньше только рубрика и тесты кода).
 - Тесты: `tests/models/test_platform_results.py` (7), `tests/contracts/test_testing.py`
   (+5, в том числе блок через `context.store`), вариант `exact` в
-  `tests/e2e/test_lesson_grading.py`. Полный прогон: 902 passed, 5 skipped (до последнего теста).
+  `tests/e2e/test_lesson_grading.py`. Итоговый полный прогон: 903 passed, 5 skipped; ruff, lint-imports, schema_export чистые.
 - ADR 0031, `docs/contract.md` (раздел 6), словарь, строка 24b в карте, «40 задач» в карте и
   `AGENTS.md`. Ревью `reviewer`: можно коммитить, проблем нет.
 
