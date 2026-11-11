@@ -75,3 +75,28 @@ jobs:
       - name: Остановить
         if: always()
         run: docker compose down -v
+
+  # Платформа для сервера (ADR 0030): образы собираются, все контейнеры запускаются за Caddy,
+  # сайт открывается по https://localhost. Модель — заглушка, данные — пустая база на один прогон.
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Настройки на один прогон
+        run: printf 'POSTGRES_PASSWORD=%s\nPLATFORM_DOMAIN=localhost\nLLM_PROVIDER=fake\n' "$(openssl rand -hex 16)" > .env
+      - name: Собрать образ для программ учеников
+        run: docker build -t platform-code-runner:local services/sandbox
+      - name: Собрать образы и запустить платформу
+        run: docker compose -f docker-compose.prod.yml up -d --build --wait
+      - name: Проверить сайт
+        run: |
+          mkdir -p tmp
+          docker compose -f docker-compose.prod.yml cp web:/data/caddy/pki/authorities/local/root.crt tmp/caddy-root.crt
+          uv run python -m experiments.deploy_check https://localhost --ca-file tmp/caddy-root.crt
+      - name: Журналы при ошибке
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --tail 50
+      - name: Остановить
+        if: always()
+        run: docker compose -f docker-compose.prod.yml down -v
