@@ -26,6 +26,7 @@ _Обновлено: 2026-11-11, агент: Claude Code_
   `frontend/src/CabinetResults.test.tsx`.
 - Ревью `reviewer`: одно замечание — `*` в кратком ответе Moodle значит «любые символы».
   Исправлено экранированием `\*`, добавлен тест.
+- Повторное ревью `reviewer` на итоговых коммитах — без замечаний.
 - Итог: `uv run pytest -q` — 820 passed, 5 skipped (песочница в Docker), 3 предупреждения
   из arq. Ruff — обе проверки, `lint-imports` — 6 kept, 0 broken. Фронтенд: 35 тестов,
   `lint`, `build`, `api:check` зелёные.
