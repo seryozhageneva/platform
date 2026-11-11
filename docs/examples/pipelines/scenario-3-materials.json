@@ -127,7 +127,7 @@
   ],
   "transitions": [
     {"from": "start", "to": "get_file"},
-    {"from": "get_file", "to": "extract"},
+    {"from": "get_file", "when": "ok", "to": "extract"},
     {"from": "extract", "when": "ok", "to": "summarize"},
     {"from": "summarize", "to": "save_summary"},
     {"from": "save_summary", "to": "make_tasks"},

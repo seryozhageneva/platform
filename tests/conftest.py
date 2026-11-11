@@ -9,11 +9,15 @@
 
 import asyncio
 from collections.abc import Iterator
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from docx import Document
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import DBAPIError
@@ -104,3 +108,54 @@ def other_teacher(sessions: Sessions) -> UserRow:
     return asyncio.run(
         UserRepository(sessions).create_teacher(name="Преподаватель Б", email="b@example.test")
     )
+
+
+@pytest.fixture
+def make_pdf():
+    """Создаёт небольшой PDF со стандартным шрифтом, без внешних файлов."""
+
+    def make(*pages: str, password: str | None = None) -> bytes:
+        writer = PdfWriter()
+        font = DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Font"),
+                NameObject("/Subtype"): NameObject("/Type1"),
+                NameObject("/BaseFont"): NameObject("/Helvetica"),
+            }
+        )
+        for page_text in pages:
+            page = writer.add_blank_page(width=200, height=200)
+            if page_text:
+                page[NameObject("/Resources")] = DictionaryObject(
+                    {
+                        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font}),
+                    }
+                )
+                stream = DecodedStreamObject()
+                stream.set_data(f"BT /F1 12 Tf 10 100 Td ({page_text}) Tj ET".encode("ascii"))
+                page.replace_contents(stream)
+        if password is not None:
+            writer.encrypt(password, algorithm="RC4-128")
+        output = BytesIO()
+        writer.write(output)
+        return output.getvalue()
+
+    return make
+
+
+@pytest.fixture
+def sample_pdf(make_pdf) -> bytes:
+    return make_pdf("First page", "Second page")
+
+
+@pytest.fixture
+def sample_docx() -> bytes:
+    document = Document()
+    document.add_paragraph("Начало лекции")
+    cells = document.add_table(rows=1, cols=2).rows[0].cells
+    cells[0].text = "Тема"
+    cells[1].text = "Дроби"
+    document.add_paragraph("Конец лекции")
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()

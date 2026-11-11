@@ -1,4 +1,4 @@
-# Черновик: описание блока без кода.
+# Копия манифеста blocks/source/file/block.yaml.
 id: source.file
 version: 0.1.0
 name: "Источник: файл"
@@ -12,4 +12,5 @@ config:
   required: [file_id]
   properties:
     file_id: {title: Файл, type: string}
+outcomes: [ok, missing]
 runtime: {type: python, entrypoint: "blocks.source.file:run"}

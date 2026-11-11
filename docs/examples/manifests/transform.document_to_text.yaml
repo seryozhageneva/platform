@@ -1,4 +1,4 @@
-# Черновик: описание блока без кода.
+# Копия манифеста blocks/transform/document_to_text/block.yaml.
 id: transform.document_to_text
 version: 0.1.0
 name: "Преобразование: документ → текст"
