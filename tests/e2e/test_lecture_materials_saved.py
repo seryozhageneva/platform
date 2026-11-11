@@ -2,6 +2,7 @@
 
 Критерий задачи 22: результаты сохраняются (банк, кабинет, файлы) и выгружаются
 (скачивание файла). Модель фейковая, подтверждает задачи преподаватель через API.
+Задача 24: узел «Решить независимо» не видит эталон и решение задачи.
 """
 
 import asyncio
@@ -73,6 +74,14 @@ def test_approved_lecture_materials_are_saved_and_downloaded(sessions, teacher, 
     assert launched.status_code == 201, launched.text
     run_id = launched.json()["id"]
     asyncio.run(run_manual(assembly, jobs[0]))
+
+    # «Решить независимо» видит номер и условие задачи, но не эталон и не решение (ADR 0029).
+    solving = [call.messages[0].content for call in llm.calls[2:]]
+    assert len(solving) == len(TASKS)
+    for prompt, task in zip(solving, TASKS, strict=True):
+        assert task["id"] in prompt and task["statement"] in prompt
+        assert task["solution"] not in prompt
+        assert '"answer"' not in prompt
 
     run = client.get(f"{API}/runs/{run_id}").json()
     assert run["status"] == "waiting", run

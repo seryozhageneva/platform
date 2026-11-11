@@ -120,3 +120,30 @@ def test_config_validation_rejects_incompatible_preset(config, wrong_result, err
     problems = config_problems({**config, "result": wrong_result}, schema, {})
     assert len(problems) == 1
     assert error in problems[0]
+
+
+def test_data_fields_hide_everything_else_from_the_model():
+    config = {
+        "prompt": "Реши задачу: {data}",
+        "result": {"type": "Answer"},
+        "data_fields": ["id", "statement"],
+    }
+    assert config_problems(config, load_manifest(MANIFEST).config, {}) == []
+    llm = FakeLLM([{"task_id": TASK["id"], "form": "text", "text": "3/4"}])
+    generate(llm, {"data": TASK}, config)
+    [call] = llm.calls
+    [message] = call.messages
+    assert TASK["statement"] in message.content
+    assert TASK["answer"] not in message.content
+    assert TASK["solution"] not in message.content
+
+    many = FakeLLM([{"task_id": TASK["id"], "form": "text", "text": "3/4"}])
+    generate(many, {"data": [TASK, {**TASK, "id": "fractions-2"}]}, config)
+    assert "fractions-2" in many.calls[0].messages[0].content
+    assert TASK["solution"] not in many.calls[0].messages[0].content
+
+
+def test_data_fields_need_a_record():
+    config = {"prompt": "{data}", "result": {"type": "Text"}, "data_fields": ["statement"]}
+    with pytest.raises(ValueError, match="только у записи"):
+        generate(FakeLLM([{"text": "x"}]), {"data": "Просто текст"}, config)

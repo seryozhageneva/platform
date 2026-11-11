@@ -29,6 +29,14 @@ config:
       type: string
       enum: [lecture_summary, lecture_tasks]
     model: {title: Модель, type: string}
+    data_fields:
+      # Модель видит только эти поля исходных данных. Так узел «Решить независимо»
+      # получает условие задачи без эталона и решения.
+      title: Какие поля исходных данных передать модели
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items: {type: string, minLength: 1}
   allOf:
     - if:
         required: [result_schema]

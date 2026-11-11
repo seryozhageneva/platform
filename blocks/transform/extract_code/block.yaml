@@ -1,0 +1,16 @@
+id: transform.extract_code
+version: 0.1.0
+name: "Преобразование: извлечение кода"
+description: >-
+  Достаёт из сданного файла текст программы и оформляет его как ответ на задачу,
+  чтобы его можно было проверить тестами в песочнице.
+author: platform
+category: transform
+inputs:
+  - {name: file, title: Файл с кодом, type: File}
+  # Номер задачи нужен ответу: песочница сверяет его с задачей, на тестах которой проверяет.
+  - {name: task, title: Задача, type: Task}
+outputs:
+  - {name: answer, title: Код как ответ, type: Answer}
+outcomes: [ok, unreadable]
+runtime: {type: python, entrypoint: "blocks.transform.extract_code:run"}
