@@ -3,7 +3,8 @@
 Блок не видит ни слой моделей `backend/llm/`, ни базу, поэтому подделки лежат рядом с
 контрактом: подключить их может и тест ядра, и тест любого блока. Фейковая модель ничего не
 отправляет в сеть — отвечает тем, что заранее написал автор теста, и запоминает, о чём её
-спросили. Подделка хранилища держит задачи, файлы и опубликованные результаты в памяти.
+спросили. Подделка хранилища держит задачи, файлы, результаты учеников и опубликованные
+результаты в памяти.
 
 Это вспомогательный файл: моделей контракта он не меняет.
 """
@@ -12,6 +13,7 @@ import json
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -20,7 +22,7 @@ from pydantic import JsonValue
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 
-from backend.core.contracts.interfaces import LLMMessage, LLMResponse
+from backend.core.contracts.interfaces import LLMMessage, LLMResponse, StudentResults
 from backend.core.contracts.ports import FileKind, FileRef, Task
 
 # Ответ, заданный в тесте: текст, данные для ответа по схеме или ошибка, с которой модель «упадёт».
@@ -145,6 +147,10 @@ class FakeStore:
     уже сохранённую запись и второй не создаёт. Одна подделка — это хранилище одного узла
     одного запуска: настоящее хранилище тоже создаётся на узел, поэтому одинаковые ключи
     в разных узлах там дают разные записи, а в общей подделке — одну.
+
+    `results` — результаты учеников для `find_results` (ADR 0031). Подделка отбрасывает
+    работы раньше `since`, а число подсказок отдаёт как есть: журнала, по которому их
+    считать, у неё нет. Ученики из `results` тоже считаются учениками преподавателя.
     """
 
     def __init__(
@@ -152,10 +158,12 @@ class FakeStore:
         tasks: Iterable[Task] = (),
         files: Iterable[tuple[FileRef, bytes]] = (),
         students: Iterable[str] = (),
+        results: Iterable[StudentResults] = (),
     ) -> None:
         self.tasks = list(tasks)
         self.files = {ref.id: (ref, content) for ref, content in files}
-        self.students = set(students)
+        self.results = list(results)
+        self.students = set(students) | {found.student_id for found in self.results}
         self.published: list[PublishedResult] = []
         self._written: dict[tuple[str, str], Any] = {}
 
@@ -184,6 +192,16 @@ class FakeStore:
     async def read_file(self, file_id: str) -> bytes | None:
         found = self.files.get(file_id)
         return None if found is None else found[1]
+
+    async def find_results(self, *, since: datetime) -> list[StudentResults]:
+        if since.tzinfo is None:
+            raise ValueError("время `since` нужно с часовым поясом")
+        return [
+            found.model_copy(
+                update={"works": [work for work in found.works if work.submitted_at >= since]}
+            )
+            for found in sorted(self.results, key=lambda found: found.name)
+        ]
 
     async def save_task(self, task: Task, *, key: str) -> Task:
         if ("task", key) not in self._written:

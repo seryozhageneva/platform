@@ -46,6 +46,7 @@ class SubmissionGrade:
         if row is None or row.verdict_status is not None:
             return
         verdict = self.verdict
+        row.correct = verdict.correct
         row.score = verdict.score
         row.max_score = verdict.max_score
         row.comment = verdict.comment

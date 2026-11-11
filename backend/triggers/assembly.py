@@ -40,7 +40,8 @@ from backend.triggers.http_blocks import HTTP_BLOCK_TIMEOUT, http_connector
 from backend.triggers.mcp_blocks import connection_tools, mcp_connector
 
 logger = logging.getLogger(__name__)
-_GRADING_INPUTS = {"check.code_tests": "answer", "check.rubric": "work"}
+# Блоки, чей вердикт записывается рядом с работой ученика, и вход, где лежит ответ (ADR 0031).
+_GRADING_INPUTS = {"check.exact": "answer", "check.code_tests": "answer", "check.rubric": "work"}
 
 
 class Assembly:
