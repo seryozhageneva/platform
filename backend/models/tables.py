@@ -1,8 +1,8 @@
 """Таблицы базы данных (ADR 0007).
 
 Таблицы: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
-запуски, журнал событий, журнал вызовов модели (ADR 0012), работы учеников (ADR 0016) и
-загруженные файлы (ADR 0023).
+запуски, журнал событий, журнал вызовов модели (ADR 0012), работы учеников (ADR 0016),
+файлы (ADR 0023) и результаты кабинета (ADR 0026).
 Остальные сущности из
 docs/vision.md добавляются миграциями в задачах, где они впервые нужны. После правки этого
 файла нужна новая миграция: тест `tests/models/test_migrations.py` падает, если забыли
@@ -15,6 +15,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+from pydantic import JsonValue
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -396,4 +397,19 @@ class FileRow(Base):
     media_type: Mapped[str]
     size: Mapped[int] = mapped_column(BigInteger)
     content: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class CabinetResultRow(Base):
+    """Результат запуска для преподавателя или конкретного ученика (ADR 0026)."""
+
+    __tablename__ = "cabinet_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"), index=True)
+    node_id: Mapped[str]
+    student_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str]
+    content: Mapped[JsonValue] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

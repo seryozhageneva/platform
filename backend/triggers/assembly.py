@@ -96,10 +96,8 @@ class Assembly:
         не увидит.
 
         Если блок ждал ученика и принял его ответ, ответ записывается в работы учеников
-        (ADR 0016): у блока хранилище только на чтение, а переспрос работой не считается.
+        (ADR 0016): переспрос работой не считается.
         """
-        tasks = self.tasks
-        files = self.files
         record = self._record_answers
 
         async def run(
@@ -112,7 +110,12 @@ class Assembly:
                 services["llm"] = bound(run_id=context.run_id, node_id=context.node_id)
             # Без преподавателя хранилище не выдаётся: ограничить его было бы некем.
             if context.teacher_id is not None:
-                services["store"] = PgPlatformStore(tasks, files, uuid.UUID(context.teacher_id))
+                services["store"] = PgPlatformStore(
+                    self._sessions,
+                    uuid.UUID(context.teacher_id),
+                    run_id=uuid.UUID(context.run_id),
+                    node_id=context.node_id,
+                )
             if services:
                 context = context.model_copy(update=services)
             result = await block.run(inputs, config, context)

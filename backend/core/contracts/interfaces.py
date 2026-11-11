@@ -8,8 +8,10 @@
 
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from pydantic import JsonValue
+
 from backend.core.contracts.base import Strict
-from backend.core.contracts.ports import FileRef, Task
+from backend.core.contracts.ports import FileKind, FileRef, Task
 
 
 class LLMMessage(Strict):
@@ -60,11 +62,12 @@ class ToolClient(Protocol):
 
 @runtime_checkable
 class PlatformStore(Protocol):
-    """Данные платформы, которые может читать встроенный блок (ADR 0014, ADR 0023).
+    """Данные платформы для встроенного блока (ADR 0014, ADR 0023, ADR 0026).
 
     Хранилище уже ограничено преподавателем запуска: блок не называет преподавателя и чужих
     данных не видит. Отдаются только подтверждённые задачи — черновик в урок не попадает.
-    Файлы — те, что загружены на платформу преподавателем запуска или его учениками.
+    Операции записи привязаны к запуску и узлу. Блок передаёт устойчивый ключ результата:
+    при повторе того же ключа и операции хранилище возвращает уже сохранённую запись.
     """
 
     async def find_tasks(
@@ -87,4 +90,24 @@ class PlatformStore(Protocol):
 
     async def read_file(self, file_id: str) -> bytes | None:
         """Содержимое загруженного файла по номеру; `None`, если такого нет (ADR 0023)."""
+        ...
+
+    async def save_task(self, task: Task, *, key: str) -> Task:
+        """Сохранить подтверждённую задачу и вернуть её с номером в банке."""
+        ...
+
+    async def save_file(
+        self, *, key: str, name: str, kind: FileKind, media_type: str, content: bytes
+    ) -> FileRef:
+        """Сохранить готовый файл преподавателя и вернуть ссылку на него."""
+        ...
+
+    async def publish_result(
+        self, *, key: str, title: str, content: JsonValue, student_id: str | None = None
+    ) -> str:
+        """Записать результат для преподавателя или его ученика и вернуть номер записи.
+
+        Чужой или неизвестный ученик вызывает ValueError. Без ученика результат адресован
+        преподавателю. Содержимое для ученика блок формирует из предназначенных ему данных.
+        """
         ...

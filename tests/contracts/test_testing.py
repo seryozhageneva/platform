@@ -249,3 +249,51 @@ def test_block_reads_a_file_through_context():
     lost = LECTURE.model_copy(update={"id": "file-2"})
     result = asyncio.run(measure({"file": lost.model_dump(mode="json")}, {}, context))
     assert result.outcome == "unreadable"
+
+
+# --- Запись через подделку (ADR 0026) ---
+
+
+def test_saved_task_is_found_and_repeat_gives_the_same_task():
+    store = FakeStore()
+    new = task("из-пайплайна", "логарифмы", 2)
+
+    saved = asyncio.run(store.save_task(new, key="k"))
+    again = asyncio.run(store.save_task(task("другая", "степени", 1), key="k"))
+
+    assert saved.id != "из-пайплайна" and again == saved
+    assert find(store) == [saved.id]
+
+
+def test_saved_file_is_readable_and_repeat_gives_the_same_file():
+    store = FakeStore()
+    save = dict(key="k", name="отчёт.pdf", kind=FileKind.DOCUMENT, media_type="application/pdf")
+
+    ref = asyncio.run(store.save_file(**save, content=b"%PDF-1.7\n"))
+    again = asyncio.run(store.save_file(**save, content=b"other"))
+
+    assert again == ref and ref.size == len(b"%PDF-1.7\n")
+    assert asyncio.run(store.read_file(ref.id)) == b"%PDF-1.7\n"
+
+
+def test_published_results_are_remembered_once_per_key():
+    store = FakeStore(students=["s1"])
+
+    first = asyncio.run(store.publish_result(key="k", title="Итог", content={"a": 1}))
+    again = asyncio.run(store.publish_result(key="k", title="Итог", content={"a": 2}))
+    personal = asyncio.run(
+        store.publish_result(key="s", title="Ваш итог", content=1, student_id="s1")
+    )
+
+    assert again == first != personal
+    assert [(r.title, r.content, r.student_id) for r in store.published] == [
+        ("Итог", {"a": 1}, None),
+        ("Ваш итог", 1, "s1"),
+    ]
+
+
+def test_result_for_an_unknown_student_is_refused():
+    store = FakeStore(students=["s1"])
+    with pytest.raises(ValueError, match="ученик не найден"):
+        asyncio.run(store.publish_result(key="k", title="Итог", content=1, student_id="s2"))
+    assert store.published == []
