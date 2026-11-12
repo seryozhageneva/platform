@@ -1,4 +1,5 @@
-"""MCP-сервер Moodle: чтение работ (задача 23, ADR 0028) и оценки (задача 27, ADR 0034).
+"""MCP-сервер Moodle: чтение работ (задача 23, ADR 0028), оценки (задача 27, ADR 0034) и
+журнал оценок курса для агента (задача 28, ADR 0035).
 
 Платформа запускает сервер дочерней программой (`python -m mcp_servers.moodle`) и говорит
 с ним по stdin/stdout. Адрес сайта и токен берутся из переменных окружения `MOODLE_URL` и
@@ -66,13 +67,33 @@ class SavedGrade(BaseModel):
     outcome: Literal["saved"]
 
 
+class GradeRow(BaseModel):
+    """Оценка одного студента за задание. Имени нет — только номер студента в Moodle."""
+
+    user_id: int
+    grade: float = Field(description="Оценка в шкале задания Moodle")
+    graded_at: int = Field(description="Время выставления оценки, Unix-время")
+
+
+class AssignmentGrades(BaseModel):
+    assignment_id: int
+    name: str
+    max_grade: float | None = Field(description="Максимум баллов; пусто — задание не в баллах")
+    grades: list[GradeRow] = Field(description="Только выставленные оценки")
+
+
+class CourseGrades(BaseModel):
+    assignments: list[AssignmentGrades]
+    outcome: Literal["ok", "empty"]
+
+
 def build_server(make_api: Callable[[], MoodleApi]) -> MCPServer:
     """Сервер с инструментами; `make_api` даёт клиента Moodle на один вызов."""
     server = MCPServer(
         "moodle",
         instructions=(
-            "Чтение сданных работ из Moodle и выставление оценок. Меняет Moodle только "
-            "инструмент save_grade."
+            "Чтение сданных работ и журнала оценок Moodle, выставление оценок. Меняет Moodle "
+            "только инструмент save_grade."
         ),
     )
 
@@ -122,6 +143,24 @@ def build_server(make_api: Callable[[], MoodleApi]) -> MCPServer:
             raise ToolError(str(error)) from None
         marks = [SubmissionMark(**item) for item in found]
         return SubmissionList(submissions=marks, outcome="ok" if marks else "empty")
+
+    @server.tool(
+        name="get_course_grades",
+        title="Журнал оценок курса",
+        description=(
+            "Оценки студентов курса Moodle по каждому заданию: номер студента в Moodle, "
+            "оценка и время. Имён нет. Неоценённые работы не попадают. Исход empty — "
+            "в курсе нет заданий."
+        ),
+        annotations=READ_ONLY,
+    )
+    async def get_course_grades(course_id: int) -> CourseGrades:
+        try:
+            found = await make_api().course_grades(course_id)
+        except MoodleError as error:
+            raise ToolError(str(error)) from None
+        assignments = [AssignmentGrades(**item) for item in found]
+        return CourseGrades(assignments=assignments, outcome="ok" if assignments else "empty")
 
     @server.tool(
         name="save_grade",

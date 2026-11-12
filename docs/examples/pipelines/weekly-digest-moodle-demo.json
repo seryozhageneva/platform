@@ -1,0 +1,52 @@
+{
+  "format": 1,
+  "id": "scenario_4_weekly_digest_moodle",
+  "name": "Сводка за неделю с журналом Moodle",
+  "description": "Собирает результаты учеников преподавателя, сама заглядывает в журнал оценок курса Moodle и сохраняет сводку в кабинете преподавателя.",
+  "params": [
+    {"name": "course_id", "title": "Курс Moodle", "type": "integer"}
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "title": "По пятницам в 18:00",
+      "launches": [{"type": "schedule", "cron": "0 18 * * 5"}]
+    },
+    {
+      "id": "get_results",
+      "type": "block",
+      "block": "source.platform_results",
+      "title": "Результаты учеников за неделю",
+      "config": {"period_days": 7},
+      "inputs": {"event": "start.event"}
+    },
+    {
+      "id": "digest",
+      "type": "block",
+      "block": "ai_process.generate",
+      "title": "Сводка для преподавателя",
+      "config": {
+        "prompt": "Составь короткую недельную сводку. Укажи, у кого нет работ или есть трудности, какие темы стоит повторить. Опирайся на вердикты, темы работ и число подсказок. Оценки за задания курса посмотри в журнале Moodle: там студенты указаны номерами, а не именами. Если данных мало, так и скажи. Верни JSON с полем summary.",
+        "result": {"type": "Data", "of": "digest"},
+        "tools": ["moodle.get_course_grades"],
+        "course_id": {"$param": "course_id"},
+        "max_steps": 3
+      },
+      "inputs": {"data": "get_results.results"}
+    },
+    {
+      "id": "to_teacher",
+      "type": "block",
+      "block": "sink.cabinet",
+      "title": "Сводка в кабинет преподавателя",
+      "config": {"to": "teacher", "title": "Сводка за неделю"},
+      "inputs": {"content": "digest.result"}
+    }
+  ],
+  "transitions": [
+    {"from": "start", "to": "get_results"},
+    {"from": "get_results", "to": "digest"},
+    {"from": "digest", "to": "to_teacher"}
+  ]
+}

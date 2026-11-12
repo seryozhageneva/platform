@@ -1,5 +1,5 @@
-"""Запросы к Moodle через Web Services (REST): чтение сдач (задача 23, ADR 0028) и
-выставление оценки (задача 27, ADR 0034).
+"""Запросы к Moodle через Web Services (REST): чтение сдач (задача 23, ADR 0028),
+выставление оценки (задача 27, ADR 0034) и журнал оценок курса (задача 28, ADR 0035).
 
 Адрес сайта и токен приходят от того, кто запускает адаптер. Токен — секрет: он уходит только
 на сам сайт Moodle и никогда не попадает в текст ошибок.
@@ -138,6 +138,54 @@ class MoodleApi:
                 if assignment.get("id") == assignment_id:
                     return assignment
         raise MoodleError("в этом курсе Moodle нет такого задания или к нему нет доступа")
+
+    async def course_grades(self, course_id: int) -> list[dict[str, Any]]:
+        """Журнал оценок курса по заданиям: номер студента и оценка, без имён.
+
+        Оценка -1 у Moodle значит «ещё не оценено»: такие строки не берутся.
+        """
+        assignments = await self.call("mod_assign_get_assignments", {"courseids[0]": course_id})
+        courses = assignments.get("courses", []) if isinstance(assignments, dict) else []
+        course = next((item for item in courses if item.get("id") == course_id), None)
+        if course is None:
+            raise MoodleError("в Moodle нет такого курса или к нему нет доступа")
+        found = course.get("assignments", [])
+        if not found:
+            return []
+        params = {f"assignmentids[{index}]": item["id"] for index, item in enumerate(found)}
+        result = await self.call("mod_assign_get_grades", params)
+        # Задание → студент → его последняя попытка: у задания с повторной сдачей строк
+        # у одного студента несколько.
+        latest: dict[int, dict[int, dict[str, Any]]] = {}
+        for assignment in result.get("assignments", []) if isinstance(result, dict) else []:
+            rows = latest.setdefault(int(assignment["assignmentid"]), {})
+            for grade in assignment.get("grades", []):
+                user = int(grade["userid"])
+                if int(grade.get("attemptnumber") or 0) >= int(
+                    rows.get(user, {}).get("attemptnumber") or 0
+                ):
+                    rows[user] = grade
+        grades = {
+            assignment: [
+                {
+                    "user_id": user,
+                    "grade": float(grade["grade"]),
+                    "graded_at": int(grade.get("timemodified") or 0),
+                }
+                for user, grade in sorted(rows.items())
+                if float(grade.get("grade") or -1) >= 0
+            ]
+            for assignment, rows in latest.items()
+        }
+        return [
+            {
+                "assignment_id": int(item["id"]),
+                "name": str(item.get("name", "")),
+                "max_grade": float(item["grade"]) if float(item.get("grade") or 0) > 0 else None,
+                "grades": grades.get(int(item["id"]), []),
+            }
+            for item in found
+        ]
 
     async def _submitted(self, course_id: int, assignment_id: int) -> list[dict[str, Any]]:
         """Сдачи задания со статусом «сдано»; черновики и пустые сдачи не берутся."""

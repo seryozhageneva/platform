@@ -80,6 +80,8 @@ class FakeMoodle:
         self.files = dict(FILES)
         # Выставленные оценки: номер студента → поля запроса mod_assign_save_grade.
         self.grades: dict[int, dict[str, str]] = {}
+        # Оценки, которые уже стояли в журнале: номер студента → оценка.
+        self.journal: dict[int, float] = {}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -122,6 +124,20 @@ class FakeMoodle:
             if form["wsfunction"] == "mod_assign_save_grade":
                 self.grades[int(form["userid"])] = form
                 return httpx.Response(200, content=b"null")
+            if form["wsfunction"] == "mod_assign_get_grades":
+                given = {user: float(fields["grade"]) for user, fields in self.grades.items()}
+                rows = [
+                    {"id": user, "userid": user, "attemptnumber": 0, "timemodified": 1794393700,
+                     "grader": 2, "grade": f"{grade:.5f}"}
+                    for user, grade in sorted({**self.journal, **given}.items())
+                ]  # fmt: skip
+                # Неоценённая работа: Moodle отдаёт её с оценкой -1.
+                rows.append({"id": 99, "userid": 8, "attemptnumber": 0, "timemodified": 0,
+                             "grader": 0, "grade": "-1.00000"})  # fmt: skip
+                return httpx.Response(
+                    200,
+                    json={"assignments": [{"assignmentid": 1, "grades": rows}], "warnings": []},
+                )
             return httpx.Response(200, json={"exception": "x", "errorcode": "accessexception"})
         if request.url.path.startswith("/webservice/pluginfile.php/"):
             if request.url.params.get("token") != self.token:
