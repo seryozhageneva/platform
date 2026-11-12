@@ -38,6 +38,7 @@ from backend.models.schedules import ScheduleRepository
 from backend.models.submissions import SubmissionGrade, SubmissionRepository
 from backend.models.tasks import TaskRepository
 from backend.models.users import UserRepository
+from backend.triggers.agent_tools import AgentTools
 from backend.triggers.http_blocks import HTTP_BLOCK_TIMEOUT, http_connector
 from backend.triggers.mcp_blocks import ToolsFor, connection_tools, mcp_connector
 
@@ -60,8 +61,9 @@ class Assembly:
         self.registry = registry
         # Подключения к внешним системам; None — в .env нет ключа шифрования (ADR 0028).
         self.connections = connections
-        # Инструменты Moodle преподавателя для опроса по событию (ADR 0034). Не заданы —
-        # берутся из подключений; без подключений опрос пишет понятную ошибку.
+        # Инструменты MCP преподавателя: для опроса Moodle по событию (ADR 0034) и для
+        # агента внутри блока (ADR 0035). Не заданы — берутся из подключений; без подключений
+        # опрос и агент пишут понятную ошибку.
         if moodle_tools is None and connections is not None:
             moodle_tools = connection_tools(connections)
         self.moodle_tools = moodle_tools
@@ -111,7 +113,8 @@ class Assembly:
         блокам одну модель и узел ей не сообщает, а запуск и узел есть в `context`, — так
         вызов попадает в журнал вызовов с ними. Хранилище платформы — ограниченное
         преподавателем этого запуска (ADR 0014, ADR 0015, ADR 0023): чужих задач и файлов блок
-        не увидит.
+        не увидит. Агенту — инструменты из манифеста блока с подключениями того же
+        преподавателя (ADR 0035).
 
         Если блок ждал ученика и принял его ответ, ответ записывается в работы учеников
         (ADR 0016): переспрос работой не считается.
@@ -134,6 +137,10 @@ class Assembly:
                     run_id=uuid.UUID(context.run_id),
                     node_id=context.node_id,
                 )
+                if block.manifest.tools and self.moodle_tools is not None:
+                    services["tools"] = AgentTools(
+                        self.moodle_tools, uuid.UUID(context.teacher_id), block.manifest.tools
+                    )
             if services:
                 context = context.model_copy(update=services)
             result = await block.run(inputs, config, context)

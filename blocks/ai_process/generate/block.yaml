@@ -1,7 +1,7 @@
 id: ai_process.generate
-version: 0.1.0
+version: 0.2.0
 name: ИИ-обработка
-description: Готовит результат по шаблону промпта и схеме. В шаблон можно подставить {data} и {context}.
+description: Готовит результат по шаблону промпта и схеме. В шаблон можно подставить {data} и {context}. Если разрешить инструменты, сам запрашивает недостающие данные, например журнал Moodle.
 author: platform
 category: ai_process
 inputs:
@@ -37,7 +37,30 @@ config:
       minItems: 1
       uniqueItems: true
       items: {type: string, minLength: 1}
+    # Агент (ADR 0035): какие инструменты из списка tools ниже разрешены этому узлу.
+    tools:
+      title: Какие инструменты разрешить
+      type: array
+      uniqueItems: true
+      items: {type: string, enum: [moodle.get_course_grades]}
+    max_steps:
+      title: Сколько раз можно вызвать инструмент
+      type: integer
+      minimum: 1
+      maximum: 10
+      default: 5
+    course_id:
+      # Курс подставляется в каждый вызов поверх того, что попросила модель:
+      # агент не заглянет в другой курс.
+      title: Курс Moodle, который видит агент
+      type: integer
   allOf:
+    - if:
+        required: [tools]
+        properties:
+          tools: {contains: {const: moodle.get_course_grades}}
+      then:
+        required: [course_id]
     - if:
         required: [result_schema]
         properties:
@@ -62,3 +85,5 @@ config:
               type: {enum: [Task]}
               list: {enum: [true]}
 runtime: {type: python, entrypoint: "blocks.ai_process.generate:run"}
+tools:
+  - {server: moodle, tool: get_course_grades}

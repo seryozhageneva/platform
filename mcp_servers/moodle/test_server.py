@@ -4,6 +4,7 @@ import asyncio
 import base64
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -40,11 +41,13 @@ def test_reading_tools_are_read_only_and_grading_is_not():
             return {tool.name: tool for tool in (await client.list_tools()).tools}
 
     tools = asyncio.run(go())
-    assert list(tools) == ["get_submissions", "list_submissions", "save_grade"]
-    for name in ("get_submissions", "list_submissions"):
+    assert list(tools) == ["get_submissions", "list_submissions", "get_course_grades", "save_grade"]
+    for name in ("get_submissions", "list_submissions", "get_course_grades"):
         assert tools[name].annotations.read_only_hint is True
         assert tools[name].annotations.destructive_hint is False
+    for name in ("get_submissions", "list_submissions"):
         assert set(tools[name].input_schema["required"]) == {"course_id", "assignment_id"}
+    assert tools["get_course_grades"].input_schema["required"] == ["course_id"]
     grade = tools["save_grade"]
     assert grade.annotations.read_only_hint is False
     assert set(grade.input_schema["required"]) == {
@@ -219,3 +222,61 @@ def test_bad_grade_is_refused_and_moodle_is_not_changed(score, max_score, max_gr
     assert result.is_error is True
     assert match in result.content[0].text
     assert moodle.grades == {}
+
+
+def _grades(moodle: FakeMoodle, course_id: int = 2):
+    async def go():
+        async with Client(build_server(_api(moodle))) as client:
+            return await client.call_tool("get_course_grades", {"course_id": course_id})
+
+    return asyncio.run(go())
+
+
+def test_course_grades_have_numbers_without_names_and_skip_ungraded():
+    moodle = FakeMoodle(max_grade=10)
+    moodle.journal = {5: 7, 4: 9.5}
+    result = _grades(moodle)
+    assert result.is_error is False
+    assert result.structured_content == {
+        "assignments": [
+            {
+                "assignment_id": 1,
+                "name": "Контрольная",
+                "max_grade": 10.0,
+                "grades": [
+                    {"user_id": 4, "grade": 9.5, "graded_at": 1794393700},
+                    {"user_id": 5, "grade": 7.0, "graded_at": 1794393700},
+                ],
+            }
+        ],
+        "outcome": "ok",
+    }
+    asked = [parse_qs(r.content.decode())["wsfunction"][0] for r in moodle.requests]
+    assert asked == ["mod_assign_get_assignments", "mod_assign_get_grades"]
+
+
+def test_course_grades_of_unknown_course_is_error():
+    result = _grades(FakeMoodle(), course_id=3)
+    assert result.is_error is True
+    assert "нет такого курса" in result.content[0].text
+
+
+def test_course_grades_take_the_last_attempt():
+    rows = [
+        {"userid": 4, "attemptnumber": 0, "timemodified": 1, "grade": "3.00000"},
+        {"userid": 4, "attemptnumber": 1, "timemodified": 2, "grade": "8.00000"},
+        {"userid": 5, "attemptnumber": 1, "timemodified": 2, "grade": "-1.00000"},
+        {"userid": 5, "attemptnumber": 0, "timemodified": 1, "grade": "6.00000"},
+    ]
+
+    def moodle(request: httpx.Request) -> httpx.Response:
+        function = parse_qs(request.content.decode())["wsfunction"][0]
+        if function == "mod_assign_get_assignments":
+            course = {"id": 2, "assignments": [{"id": 1, "name": "Лаба", "grade": 10}]}
+            return httpx.Response(200, json={"courses": [course], "warnings": []})
+        return httpx.Response(200, json={"assignments": [{"assignmentid": 1, "grades": rows}]})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(moodle))
+    found = asyncio.run(MoodleApi(SITE, TOKEN, client).course_grades(2))
+    # У студента 5 последняя попытка ещё не оценена: прошлая оценка к ней не относится.
+    assert found[0]["grades"] == [{"user_id": 4, "grade": 8.0, "graded_at": 2}]

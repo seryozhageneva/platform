@@ -60,6 +60,7 @@ def test_client_has_contract_interface_and_reports_read_only():
     assert [(tool.server, tool.name, tool.read_only) for tool in tools] == [
         ("moodle", "get_submissions", True),
         ("moodle", "list_submissions", True),
+        ("moodle", "get_course_grades", True),
         ("moodle", "save_grade", False),
     ]
 

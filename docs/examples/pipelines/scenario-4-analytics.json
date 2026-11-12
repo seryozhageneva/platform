@@ -22,22 +22,17 @@
       "inputs": {"event": "start.event"}
     },
     {
-      "id": "get_grades",
-      "type": "block",
-      "block": "source.moodle_grades",
-      "title": "Оценки из Moodle",
-      "config": {"course_id": {"$param": "course_id"}}
-    },
-    {
       "id": "analyze",
       "type": "block",
       "block": "ai_process.generate",
       "title": "Найти отстающих и типичные ошибки",
       "config": {
-        "prompt": "Найди отстающих, типичные ошибки и темы для повторения.",
-        "result": {"type": "Data", "of": "group_analysis"}
+        "prompt": "Найди отстающих, типичные ошибки и темы для повторения. Оценки курса посмотри в журнале Moodle.",
+        "result": {"type": "Data", "of": "group_analysis"},
+        "tools": ["moodle.get_course_grades"],
+        "course_id": {"$param": "course_id"}
       },
-      "inputs": {"data": "get_results.results", "context": "get_grades.grades"}
+      "inputs": {"data": "get_results.results"}
     },
     {
       "id": "digest",
@@ -140,8 +135,7 @@
   ],
   "transitions": [
     {"from": "start", "to": "get_results"},
-    {"from": "get_results", "when": "ok", "to": "get_grades"},
-    {"from": "get_grades", "to": "analyze"},
+    {"from": "get_results", "when": "ok", "to": "analyze"},
     {"from": "analyze", "to": "digest"},
     {"from": "digest", "to": "to_teacher"},
     {"from": "to_teacher", "to": "each_student"},
