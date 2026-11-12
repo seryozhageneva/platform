@@ -1,0 +1,142 @@
+{
+  "format": 1,
+  "id": "cloud_lecture_demo",
+  "name": "Подготовка материалов из облака",
+  "description": "Лекция берётся с Яндекс Диска преподавателя. Из текста лекции получаются конспект и задачи с эталонными решениями; задачи проверяются и после подтверждения попадают в банк и в файл.",
+  "params": [
+    {"name": "lecture_path", "title": "Путь к лекции на Яндекс Диске", "type": "string"}
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "title": "Преподаватель нажал «Запустить»",
+      "launches": [{"type": "manual"}]
+    },
+    {
+      "id": "get_file",
+      "type": "block",
+      "block": "source.cloud_file",
+      "title": "Взять лекцию с Яндекс Диска",
+      "config": {"path": {"$param": "lecture_path"}}
+    },
+    {
+      "id": "extract",
+      "type": "block",
+      "block": "transform.document_to_text",
+      "title": "Извлечь текст",
+      "inputs": {"file": "get_file.file"}
+    },
+    {
+      "id": "summarize",
+      "type": "block",
+      "block": "ai_process.generate",
+      "title": "Сделать конспект",
+      "config": {
+        "prompt": "Составь краткий конспект и список ключевых понятий. В конспекте изложи правила расчёта и приведи пример из лекции. Используй сведения из лекции.\n\n{data}",
+        "result": {"type": "Data", "of": "summary"},
+        "result_schema": "lecture_summary"
+      },
+      "inputs": {"data": "extract.text"}
+    },
+    {
+      "id": "save_summary",
+      "type": "block",
+      "block": "sink.cabinet",
+      "title": "Конспект в кабинет",
+      "config": {"to": "teacher", "title": "Конспект лекции"},
+      "inputs": {"content": "summarize.result"}
+    },
+    {
+      "id": "make_tasks",
+      "type": "block",
+      "block": "ai_process.generate",
+      "title": "Сгенерировать задачи",
+      "config": {
+        "prompt": "Составь две разные задачи по лекции, каждая с одним числовым ответом. В answer запиши только точное число или дробь вида 17/3, без округления, единиц измерения и пояснений. В solution приведи ход решения. Задай каждой задаче свой id и выбери short_answer как способ проверки.\n\nЛекция: {data}\n\nКонспект: {context}",
+        "result": {"type": "Task", "list": true},
+        "result_schema": "lecture_tasks"
+      },
+      "inputs": {"data": "extract.text", "context": "summarize.result"}
+    },
+    {
+      "id": "each_task",
+      "type": "for_each",
+      "title": "Для каждой задачи",
+      "over": "make_tasks.result",
+      "body": {
+        "start": "solve",
+        "nodes": [
+          {
+            "id": "solve",
+            "type": "block",
+            "block": "ai_process.generate",
+            "title": "Решить независимо",
+            "config": {
+              "prompt": "Реши задачу. Верни только ответ.",
+              "result": {"type": "Answer"},
+              "data_fields": ["id", "statement"]
+            },
+            "inputs": {"data": "each_task.item"}
+          },
+          {
+            "id": "verify",
+            "type": "block",
+            "block": "check.exact",
+            "title": "Сверить с эталоном",
+            "inputs": {"task": "each_task.item", "answer": "solve.result"}
+          }
+        ],
+        "transitions": [{"from": "solve", "to": "verify"}]
+      },
+      "collect": {"task": "each_task.item", "verdict": "verify.verdict"},
+      "as": "checked_task"
+    },
+    {
+      "id": "review",
+      "type": "block",
+      "block": "approval.review_table",
+      "title": "Преподаватель подтверждает задачи",
+      "config": {"editable_fields": "task.statement, task.solution"},
+      "inputs": {"items": "each_task.results"}
+    },
+    {
+      "id": "each_approved",
+      "type": "for_each",
+      "title": "Для каждой подтверждённой задачи",
+      "over": "review.approved",
+      "body": {
+        "start": "to_bank",
+        "nodes": [
+          {
+            "id": "to_bank",
+            "type": "block",
+            "block": "sink.task_bank",
+            "title": "Сохранить в банк задач",
+            "inputs": {"task": "each_approved.item.task"}
+          }
+        ]
+      },
+      "collect": "each_approved.item.task"
+    },
+    {
+      "id": "export",
+      "type": "block",
+      "block": "sink.file",
+      "title": "Выгрузить файл для Moodle",
+      "config": {"format": "moodle_xml"},
+      "inputs": {"content": "each_approved.results"}
+    }
+  ],
+  "transitions": [
+    {"from": "start", "to": "get_file"},
+    {"from": "get_file", "when": "ok", "to": "extract"},
+    {"from": "extract", "when": "ok", "to": "summarize"},
+    {"from": "summarize", "to": "save_summary"},
+    {"from": "save_summary", "to": "make_tasks"},
+    {"from": "make_tasks", "to": "each_task"},
+    {"from": "each_task", "when": "ok", "to": "review"},
+    {"from": "review", "when": "approved", "to": "each_approved"},
+    {"from": "each_approved", "when": "ok", "to": "export"}
+  ]
+}

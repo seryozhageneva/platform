@@ -341,6 +341,7 @@ def test_builtin_blocks_load_without_problems():
         "sink.email",
         "sink.moodle_grades",
         "sink.telegram",
+        "source.cloud_file",
         "source.moodle_submissions",
     }
     assert "source.task_bank" in registry.blocks

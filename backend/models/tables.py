@@ -58,6 +58,7 @@ class ConnectionKind(StrEnum):
 
     MOODLE = "moodle"
     TELEGRAM = "telegram"
+    CLOUD = "cloud"
 
 
 class TaskStatus(StrEnum):

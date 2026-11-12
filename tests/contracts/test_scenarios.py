@@ -12,13 +12,17 @@ from backend.core.contracts.pipeline import BlockNode, parse_pipeline
 from backend.core.contracts.ports import DataType
 from backend.core.contracts.wiring import Wiring, check_wiring
 
+# Варианты сценариев: тот же граф, но на месте одного блока — другой. Облако встаёт на место
+# загруженного файла в сценарии 3 (ADR 0036).
+VARIANTS = ["cloud-lecture-demo"]
+
 
 def blocks_of(name: str) -> set[str]:
     pipeline = parse_pipeline(scenario(name))
     return {node.block for node, _ in pipeline.walk() if isinstance(node, BlockNode)}
 
 
-@pytest.mark.parametrize("name", SCENARIOS)
+@pytest.mark.parametrize("name", SCENARIOS + VARIANTS)
 def test_scenario_is_wired_correctly(name, manifests):
     pipeline = parse_pipeline(scenario(name))
     assert blocks_of(name) <= set(manifests)
@@ -26,7 +30,7 @@ def test_scenario_is_wired_correctly(name, manifests):
 
 
 def test_scenarios_use_every_block_and_category(manifests):
-    used = set().union(*(blocks_of(name) for name in SCENARIOS))
+    used = set().union(*(blocks_of(name) for name in SCENARIOS + VARIANTS))
     assert used == set(manifests), "есть черновик манифеста, который не нужен ни одному сценарию"
     assert {manifests[block].category for block in used} == set(Category)
 

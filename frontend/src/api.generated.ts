@@ -693,12 +693,12 @@ export interface components {
             /**
              * Token
              * Format: password
-             * @description Токен Moodle или бота; не возвращается
+             * @description Токен Moodle, бота или Яндекс Диска; не возвращается
              */
             token: string;
             /**
              * Url
-             * @description Адрес сайта Moodle. Для Telegram можно опустить.
+             * @description Адрес сайта Moodle. Для Telegram и облака можно опустить.
              */
             url?: string | null;
         };
@@ -707,7 +707,7 @@ export interface components {
          * @description К какой внешней системе подключается преподаватель.
          * @enum {string}
          */
-        ConnectionKind: "moodle" | "telegram";
+        ConnectionKind: "moodle" | "telegram" | "cloud";
         /** ConnectionOut */
         ConnectionOut: {
             /**

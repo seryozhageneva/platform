@@ -1,0 +1,38 @@
+# Блок-обёртка над инструментом MCP-сервера облака (runtime mcp, ADR 0036).
+id: source.cloud_file
+version: 0.1.0
+name: "Источник: файл из облака"
+description: >-
+  Берёт файл с Яндекс Диска преподавателя по пути, например /Лекции/лекция.pdf. Токен
+  Диска — в подключении «cloud» преподавателя. Диск блок не меняет.
+author: platform
+category: source
+kind: auto
+
+outputs:
+  # Путь к файлу на Диске — в meta.cloud_path.
+  - name: file
+    title: Файл
+    type: File
+
+config:
+  type: object
+  required: [path]
+  properties:
+    path:
+      title: Путь к файлу на Яндекс Диске
+      type: string
+      minLength: 1
+      maxLength: 1024
+
+# missing — по этому пути на Диске файла нет.
+outcomes: [ok, missing]
+
+# Ядро вызывает инструмент get_file сервера cloud как обычную функцию.
+# Токен берётся из подключения преподавателя, в манифесте его нет.
+runtime:
+  type: mcp
+  server: cloud
+  tool: get_file
+
+side_effects: false
