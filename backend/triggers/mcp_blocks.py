@@ -268,6 +268,10 @@ async def _as_result(manifest: Manifest, answer: Any, store: PlatformStore) -> D
     for name, value in answer.items():
         if name == "outcome":
             continue
+        # Пустое поле — выхода нет, но только при исходе не ok: например, файла нет при
+        # missing. При ok пустой выход — ошибка сервера, она ловится ниже (ADR 0036).
+        if value is None and outcome != "ok":
+            continue
         port = ports[name]
         if port.type is PortType.FILE:
             items = value if port.is_list and isinstance(value, list) else [value]

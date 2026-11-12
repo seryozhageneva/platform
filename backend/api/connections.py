@@ -1,4 +1,4 @@
-"""Подключения преподавателя к Moodle и Telegram (ADR 0028, 0033).
+"""Подключения преподавателя к Moodle, Telegram и облаку (ADR 0028, 0033, 0036).
 
 Токен принимается, шифруется и больше никогда не отдаётся: в ответах только вид, адрес и
 время изменения. Чужие подключения не видны. Формы в браузере пока нет — только API.
@@ -26,14 +26,20 @@ router = APIRouter(
 
 TELEGRAM_API = "https://api.telegram.org"
 _BOT_TOKEN = re.compile(r"[0-9]{1,20}:[A-Za-z0-9_-]+")
+# Облако — Яндекс Диск; токен OAuth из букв, цифр, «_», «-» и «.».
+CLOUD_API = "https://cloud-api.yandex.net"
+_OAUTH_TOKEN = re.compile(r"[A-Za-z0-9_.-]{16,}")
 
 
 class ConnectionIn(BaseModel):
     url: Annotated[
-        str | None, Field(description="Адрес сайта Moodle. Для Telegram можно опустить.")
+        str | None,
+        Field(description="Адрес сайта Moodle. Для Telegram и облака можно опустить."),
     ] = None
     # SecretStr: токен не попадёт в журнал и в текст ошибок проверки.
-    token: Annotated[SecretStr, Field(description="Токен Moodle или бота; не возвращается")]
+    token: Annotated[
+        SecretStr, Field(description="Токен Moodle, бота или Яндекс Диска; не возвращается")
+    ]
 
     @field_validator("url")
     @classmethod
@@ -101,6 +107,12 @@ async def save_connection(
         if not _BOT_TOKEN.fullmatch(token):
             raise ApiError(422, "токен бота Telegram записан в неверном формате")
         url = TELEGRAM_API
+    elif kind is ConnectionKind.CLOUD:
+        if url not in (None, CLOUD_API):
+            raise ApiError(422, "для облака используется только Яндекс Диск: " + CLOUD_API)
+        if not _OAUTH_TOKEN.fullmatch(token):
+            raise ApiError(422, "токен Яндекс Диска записан в неверном формате")
+        url = CLOUD_API
     elif url is None or not token.isalnum():
         raise ApiError(422, "для Moodle нужны адрес сайта и буквенно-цифровой токен")
     row = await _repository(assembly).save(teacher.id, kind, url=url, token=token)

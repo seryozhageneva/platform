@@ -114,6 +114,16 @@ def test_builtin_server_gets_credentials_only_through_its_environment():
         builtin_server("gmail", url="x", token="y")
 
 
+def test_cloud_server_starts_with_token_only_and_reads_only():
+    cloud = builtin_server("cloud", url="https://cloud-api.yandex.net", token="y0_fake-token")
+    assert cloud.args == ["-m", "mcp_servers.cloud"]
+    assert cloud.env == {"CLOUD_TOKEN": "y0_fake-token"}
+    tools = asyncio.run(McpToolClient({"cloud": cloud}).list_tools())
+    assert [(tool.server, tool.name, tool.read_only) for tool in tools] == [
+        ("cloud", "get_file", True)
+    ]
+
+
 def test_notification_servers_start_and_agent_cannot_call_them():
     telegram = builtin_server("telegram", url="https://api.telegram.org", token="123:fake-test_bot")
     assert telegram.env == {"TELEGRAM_TOKEN": "123:fake-test_bot"}
@@ -302,6 +312,23 @@ def test_bad_server_answer_is_block_error(answer, match):
     block = registry_with(server).blocks["source.moodle_submissions"]
     with pytest.raises(RuntimeError, match=match):
         asyncio.run(block.run({}, CONFIG, context(FakeStore())))
+
+
+@pytest.mark.parametrize(("outcome", "fails"), [("ok", True), ("empty", False)])
+def test_empty_output_is_allowed_only_when_outcome_is_not_ok(outcome, fails):
+    server = MCPServer("moodle")
+
+    @server.tool(name="get_submissions", annotations=ToolAnnotations(read_only_hint=True))
+    async def get_submissions(course_id: int, assignment_id: int) -> dict[str, Any]:
+        return {"works": None, "outcome": outcome}
+
+    block = registry_with(server).blocks["source.moodle_submissions"]
+    if fails:
+        with pytest.raises(RuntimeError, match="без содержимого"):
+            asyncio.run(block.run({}, CONFIG, context(FakeStore())))
+    else:
+        done = asyncio.run(block.run({}, CONFIG, context(FakeStore())))
+        assert (done.outcome, done.outputs) == ("empty", {})
 
 
 def test_unknown_server_is_not_loaded(tmp_path):

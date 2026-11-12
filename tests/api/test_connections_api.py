@@ -58,6 +58,26 @@ def test_telegram_uses_fixed_address_and_keeps_token_private(api, me, stranger):
         assert body["token"] not in answer.text
 
 
+def test_cloud_uses_yandex_disk_address_and_keeps_token_private(api, me, stranger):
+    token = "y0_fake-test_token_0123456789abcdef"
+    saved = api.put("/api/v1/connections/cloud", json={"token": token}, headers=me)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["url"] == "https://cloud-api.yandex.net"
+    assert saved.json()["kind"] == "cloud"
+    listed = api.get("/api/v1/connections", headers=me)
+    assert token not in saved.text + listed.text
+    assert api.get("/api/v1/connections", headers=stranger).json() == []
+
+    for body in (
+        {"token": "short"},
+        {"token": "y0_token with spaces 0123456789"},
+        {"url": "https://webdav.example.test", "token": token},
+    ):
+        answer = api.put("/api/v1/connections/cloud", json=body, headers=me)
+        assert answer.status_code == 422, answer.text
+        assert body["token"] not in answer.text
+
+
 def test_without_login_nothing_is_available(api):
     assert api.get("/api/v1/connections").status_code == 401
     assert api.put("/api/v1/connections/moodle", json=MOODLE).status_code == 401

@@ -30,6 +30,7 @@ BUILTIN_SERVERS = {
     "moodle": "mcp_servers.moodle",
     "email": "mcp_servers.email",
     "telegram": "mcp_servers.telegram",
+    "cloud": "mcp_servers.cloud",
 }
 
 # Что сервер может получить: процесс адресуется так же, как и в тестах — по объекту сервера.
@@ -45,6 +46,9 @@ def builtin_server(name: str, *, url: str, token: str) -> StdioServerParameters:
     if name == "telegram":
         # Telegram ходит на фиксированный адрес Bot API.
         return _stdio_server(name, env={"TELEGRAM_TOKEN": token})
+    if name == "cloud":
+        # Облако — Яндекс Диск с постоянным адресом API (ADR 0036).
+        return _stdio_server(name, env={"CLOUD_TOKEN": token})
     prefix = name.upper()
     return _stdio_server(name, env={f"{prefix}_URL": url, f"{prefix}_TOKEN": token})
 
