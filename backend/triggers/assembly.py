@@ -236,7 +236,9 @@ async def open_assembly(*, llm: LLMClient | None = None) -> AsyncIterator[Assemb
             # Без ключа платформа работает, но подключения и блоки MCP недоступны.
             logger.warning("подключения недоступны: %s", error)
         else:
-            connectors["mcp"] = mcp_connector(connection_tools(connections))
+            connectors["mcp"] = mcp_connector(
+                connection_tools(connections), users=UserRepository(sessions)
+            )
         registry = load_registry(BUILTIN_BLOCKS, connectors)
         for problem in registry.problems:
             logger.warning("блок не загружен: %s", problem)

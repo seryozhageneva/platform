@@ -36,6 +36,8 @@ COPY backend backend
 COPY blocks blocks
 COPY mcp_servers mcp_servers
 COPY services services
+# Проверяем, что адаптеры уведомлений загружаются из собранного образа.
+RUN python -c "import mcp_servers.email.server; import mcp_servers.telegram.server"
 # Сервер работает не от имени администратора контейнера.
 USER 10001:10001
 CMD ["python", "-m", "backend.api"]

@@ -46,6 +46,7 @@ def test_openapi_describes_every_endpoint(client):
         ("POST", f"{API}/student/lessons/{{lesson_id}}/responses"),
         ("GET", f"{API}/students"),
         ("POST", f"{API}/students"),
+        ("PUT", f"{API}/students/{{student_id}}/notification-contacts"),
         ("POST", f"{API}/students/{{student_id}}/link"),
         ("DELETE", f"{API}/students/{{student_id}}/link"),
         ("POST", f"{API}/pipelines"),

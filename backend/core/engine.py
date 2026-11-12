@@ -18,7 +18,7 @@ from referencing import Registry
 from referencing.exceptions import Unresolvable
 
 from backend.core.contracts.interfaces import LLMClient
-from backend.core.contracts.manifest import Kind, Manifest
+from backend.core.contracts.manifest import Kind, Manifest, McpRuntime
 from backend.core.contracts.pipeline import (
     BlockNode,
     ForEachNode,
@@ -68,6 +68,10 @@ class LoadedBlock:
     manifest: Manifest
     run: BlockRun
     validate_response: Callable[[dict[str, Any], dict[str, Any]], str | None] | None = None
+
+
+def _is_mcp_write(manifest: Manifest) -> bool:
+    return manifest.side_effects and isinstance(manifest.runtime, McpRuntime)
 
 
 class NodeFailed(Exception):
@@ -348,6 +352,20 @@ class Engine:
         # Законченный запуск продолжать некуда, а запуск на паузе продолжает `respond`.
         if state.status in (RunStatus.DONE, RunStatus.WAITING):
             return state
+        if state.current:
+            node_id = state.current[0]
+            place = _places(pipeline).get(node_id)
+            block = (
+                self._blocks.get(place.node.block)
+                if place and isinstance(place.node, BlockNode)
+                else None
+            )
+            if block is not None and _is_mcp_write(block.manifest):
+                if state.status is RunStatus.ERROR:
+                    return state
+                return await self._fail(
+                    state, node_id, "запуск прервался, результат внешнего действия неизвестен"
+                )
         state.error = None
         if state.waiting:
             # Блок упал уже после ответа человека. Экран остаётся прежним: человек отвечает
@@ -552,7 +570,9 @@ class Engine:
         config = with_params(node.config, state.params)
         # Блок, который ждёт человека, не повторяется: после ответа повтор задал бы ему
         # тот же вопрос без самого человека.
-        retries = MAX_RETRIES if block.manifest.kind is Kind.AUTO else 0
+        manifest = block.manifest
+        # MCP-действие могло выполниться даже при потере ответа. Повтор продублирует его.
+        retries = MAX_RETRIES if manifest.kind is Kind.AUTO and not _is_mcp_write(manifest) else 0
         for attempt in range(1, retries + 2):
             context = RunContext(
                 run_id=state.run_id,

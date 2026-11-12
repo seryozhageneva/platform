@@ -4,6 +4,8 @@
 помог и третий повтор, запуск получает статус «ошибка» и ждёт, пока его продолжат (ADR 0008).
 """
 
+import asyncio
+
 import pytest
 
 from backend.core.contracts.run import Done, Waiting
@@ -94,6 +96,51 @@ def test_attempts_are_counted_anew_when_the_run_is_continued(go, flaky, calls):
     # Четыре вызова до остановки; после продолжения — ещё один сбой и удачная вторая попытка.
     assert state.status is RunStatus.DONE
     assert attempts(calls) == [1, 2, 3, 4, 1, 2]
+
+
+def test_mcp_action_is_not_retried_after_losing_its_response(go, graph, add_block, called):
+    async def send(inputs, config, context):
+        raise TimeoutError("ответ о доставке потерян")
+
+    add_block(
+        "sink.email",
+        send,
+        side_effects=True,
+        runtime={"type": "mcp", "server": "email", "tool": "send_email"},
+    )
+    pipeline = graph([{"id": "send", "type": "block", "block": "sink.email"}])
+
+    state = go.start(pipeline)
+
+    assert state.status is RunStatus.ERROR and "ответ о доставке потерян" in state.error
+    assert go.resume(pipeline).error == state.error
+    assert called() == ["send"]
+    assert [kind for _, kind, _ in go.journal("attempt_failed", "node_failed")] == ["node_failed"]
+
+
+def test_resume_does_not_repeat_mcp_action_after_interruption(go, graph, add_block, called):
+    deliveries = []
+
+    async def send(inputs, config, context):
+        deliveries.append("письмо принято")
+        raise asyncio.CancelledError
+
+    add_block(
+        "sink.email",
+        send,
+        side_effects=True,
+        runtime={"type": "mcp", "server": "email", "tool": "send_email"},
+    )
+    pipeline = graph([{"id": "send", "type": "block", "block": "sink.email"}])
+    with pytest.raises(asyncio.CancelledError):
+        go.start(pipeline)
+
+    resumed = go.resume(pipeline)
+
+    assert resumed.status is RunStatus.ERROR
+    assert "результат внешнего действия неизвестен" in resumed.error
+    assert called() == ["send"] and deliveries == ["письмо принято"]
+    assert go.resume(pipeline).error == resumed.error
 
 
 def test_every_attempt_gets_the_inputs_untouched(go, graph, add_block, calls):

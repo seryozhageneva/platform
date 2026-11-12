@@ -73,7 +73,7 @@
             "title": "Персональная рекомендация",
             "config": {
               "prompt": "Напиши ученику короткую рекомендацию: что повторить.",
-              "result": {"type": "Data", "of": "message"}
+              "result": {"type": "Text"}
             },
             "inputs": {"data": "each_student.item", "context": "analyze.result"}
           }
@@ -87,7 +87,7 @@
       "type": "block",
       "block": "approval.review_table",
       "title": "Преподаватель подтверждает рассылку",
-      "config": {"editable_fields": "message"},
+      "config": {"editable_fields": "message.text"},
       "inputs": {"items": "each_student.results"}
     },
     {
