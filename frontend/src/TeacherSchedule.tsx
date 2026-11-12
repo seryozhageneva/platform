@@ -1,18 +1,43 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, errorMessage } from "./api";
-import type { Pipeline, ScheduleDetails, ScheduleUpdate } from "./api";
+import type { MoodleWatchDetails, Pipeline, ScheduleDetails, ScheduleUpdate } from "./api";
 
 type Param = Pipeline["params"][number];
+type Details = ScheduleDetails | MoodleWatchDetails;
+
+// Два способа запуска без человека: по расписанию и по событию Moodle (ADR 0032, ADR 0034).
+// Настройки у них одинаковые — включено ли и с какими параметрами пайплайна.
+const kinds = {
+  schedule: {
+    title: "Расписание",
+    loading: "Загрузка расписания…",
+    save: "Сохранить расписание",
+    saved: "Настройки расписания сохранены.",
+    load: (accountId: string, pipelineId: string): Promise<Details> => api.schedule(accountId, pipelineId),
+    store: (accountId: string, pipelineId: string, body: ScheduleUpdate): Promise<Details> =>
+      api.saveSchedule(accountId, pipelineId, body),
+  },
+  moodle: {
+    title: "Событие Moodle",
+    loading: "Загрузка настроек опроса Moodle…",
+    save: "Сохранить запуск по событию Moodle",
+    saved: "Настройки запуска по событию Moodle сохранены.",
+    load: (accountId: string, pipelineId: string): Promise<Details> => api.moodleWatch(accountId, pipelineId),
+    store: (accountId: string, pipelineId: string, body: ScheduleUpdate): Promise<Details> =>
+      api.saveMoodleWatch(accountId, pipelineId, body),
+  },
+};
 
 const moscowTime = new Intl.DateTimeFormat("ru-RU", {
   dateStyle: "short", timeStyle: "short", timeZone: "Europe/Moscow",
 });
 
-export function TeacherSchedule({ accountId, pipelineId, version, params, disabled, onSessionChange }: {
-  accountId: string; pipelineId: string; version: number; params: Param[];
+export function TeacherSchedule({ kind = "schedule", accountId, pipelineId, version, params, disabled, onSessionChange }: {
+  kind?: keyof typeof kinds; accountId: string; pipelineId: string; version: number; params: Param[];
   disabled: boolean; onSessionChange: () => void;
 }) {
-  const [saved, setSaved] = useState<ScheduleDetails>();
+  const text = kinds[kind];
+  const [saved, setSaved] = useState<Details>();
   const [enabled, setEnabled] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(true);
@@ -21,7 +46,7 @@ export function TeacherSchedule({ accountId, pipelineId, version, params, disabl
 
   useEffect(() => {
     let active = true;
-    api.schedule(accountId, pipelineId).then((schedule) => {
+    text.load(accountId, pipelineId).then((schedule) => {
       if (!active) return;
       setSaved(schedule);
       setEnabled(schedule.enabled);
@@ -34,7 +59,7 @@ export function TeacherSchedule({ accountId, pipelineId, version, params, disabl
       if (active) setPending(false);
     });
     return () => { active = false; };
-  }, [accountId, pipelineId, onSessionChange]);
+  }, [text, accountId, pipelineId, onSessionChange]);
 
   async function save() {
     setError("");
@@ -55,10 +80,10 @@ export function TeacherSchedule({ accountId, pipelineId, version, params, disabl
     }
     setPending(true);
     try {
-      setSaved(await api.saveSchedule(accountId, pipelineId, {
+      setSaved(await text.store(accountId, pipelineId, {
         enabled, params: given, expected_version: version,
       }));
-      setStatus("Настройки расписания сохранены.");
+      setStatus(text.saved);
     } catch (failure) {
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) onSessionChange();
       setError(failure instanceof ApiError && failure.problems.length
@@ -69,11 +94,19 @@ export function TeacherSchedule({ accountId, pipelineId, version, params, disabl
     }
   }
 
-  return <section aria-label="Расписание">
-    <h3>Расписание</h3>
-    {saved?.cron && <p>{saved.cron} · время Москвы</p>}
-    {saved?.last_fired_at && <p>Последний запуск поставлен в очередь {moscowTime.format(new Date(saved.last_fired_at))} (МСК).</p>}
-    {pending && !saved && <p role="status">Загрузка расписания…</p>}
+  return <section aria-label={text.title}>
+    <h3>{text.title}</h3>
+    {saved && "cron" in saved && saved.cron && <p>{saved.cron} · время Москвы</p>}
+    {saved && "last_fired_at" in saved && saved.last_fired_at &&
+      <p>Последний запуск поставлен в очередь {moscowTime.format(new Date(saved.last_fired_at))} (МСК).</p>}
+    {saved && "poll_minutes" in saved && <>
+      {saved.poll_minutes && <p>Платформа проверяет Moodle раз в {saved.poll_minutes} мин. и запускает
+        пайплайн на новые сданные работы.</p>}
+      {saved.last_polled_at && <p>Последняя проверка {moscowTime.format(new Date(saved.last_polled_at))} (МСК).
+        Уже взято работ: {saved.seen_submissions}.</p>}
+      {saved.last_error && <p>Ошибка проверки Moodle: {saved.last_error}</p>}
+    </>}
+    {pending && !saved && <p role="status">{text.loading}</p>}
     {disabled && <p>Сначала сохраните изменения пайплайна.</p>}
     {error && <p role="alert">{error}</p>}
     {status && <p role="status">{status}</p>}
@@ -110,7 +143,7 @@ export function TeacherSchedule({ accountId, pipelineId, version, params, disabl
             onChange={(event) => update(event.target.value)} />}
         </label>;
       })}
-      <button type="button" onClick={() => void save()}>Сохранить расписание</button>
+      <button type="button" onClick={() => void save()}>{text.save}</button>
     </fieldset>}
   </section>;
 }

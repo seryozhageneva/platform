@@ -49,7 +49,8 @@ def test_weekly_digest_reaches_the_teacher_cabinet(sessions, teacher, other_teac
         await users.create_student(other_teacher.id, name="Медведь")
         redis_settings = RedisSettings(host="127.0.0.1")
         name = f"platform:test:{uuid4()}"
-        (tick,) = WorkerSettings.cron_jobs
+        # Только проверка расписаний: опрос Moodle этому сценарию не нужен.
+        [tick] = [job for job in WorkerSettings.cron_jobs if job.name.endswith("check_schedules")]
         worker = Worker(
             WorkerSettings.functions,
             cron_jobs=[replace(tick, run_at_startup=True)],

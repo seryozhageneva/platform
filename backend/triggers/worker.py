@@ -13,6 +13,7 @@ from arq import cron
 from backend.core.contracts.ports import Event
 from backend.core.contracts.state import RunStatus
 from backend.triggers.assembly import Assembly, open_assembly
+from backend.triggers.moodle_event import poll_moodle
 from backend.triggers.queue import (
     QUEUE_NAME,
     RUN_TIMEOUT,
@@ -70,6 +71,15 @@ async def check_schedules(ctx: dict[str, Any]) -> None:
     )
 
 
+async def check_moodle(ctx: dict[str, Any]) -> None:
+    redis = ctx["redis"]
+    await poll_moodle(
+        ctx["assembly"],
+        LaunchQueue(redis, name=redis.default_queue_name).enqueue,
+        now=datetime.now(UTC),
+    )
+
+
 async def _startup(ctx: dict[str, Any]) -> None:
     async with AsyncExitStack() as resources:
         ctx["assembly"] = await resources.enter_async_context(open_assembly())
@@ -82,7 +92,8 @@ async def _shutdown(ctx: dict[str, Any]) -> None:
 
 class WorkerSettings:
     functions = [execute_manual]
-    cron_jobs = [cron(check_schedules, second=0)]
+    # Опрос Moodle — на полминуты позже расписаний, чтобы не ждать друг друга.
+    cron_jobs = [cron(check_schedules, second=0), cron(check_moodle, second=30)]
     queue_name = QUEUE_NAME
     redis_settings = QueueSettings().connection_settings()
     job_serializer = staticmethod(serialize_job)

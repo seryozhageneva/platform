@@ -203,7 +203,6 @@ def test_bypassing_approval_is_a_warning_not_an_error(scenario, example_manifest
     assert report.ok and report.errors == []
     assert [(w.node, w.code) for w in report.warnings] == [
         ("to_moodle", "no_approval"),
-        ("to_email", "no_approval"),
     ]
     assert "блок «sink.moodle_grades» действует во внешнем мире" in report.warnings[0].message
 

@@ -30,6 +30,7 @@ from backend.models.connections import ConnectionRepository, SecretBox
 from backend.models.db import Sessions, make_engine, make_sessions
 from backend.models.files import FileRepository
 from backend.models.llm_calls import LLMCallRepository
+from backend.models.moodle_watches import MoodleWatchRepository
 from backend.models.pipelines import PipelineRepository
 from backend.models.platform_store import PgPlatformStore
 from backend.models.run_store import PgRunStore
@@ -38,7 +39,7 @@ from backend.models.submissions import SubmissionGrade, SubmissionRepository
 from backend.models.tasks import TaskRepository
 from backend.models.users import UserRepository
 from backend.triggers.http_blocks import HTTP_BLOCK_TIMEOUT, http_connector
-from backend.triggers.mcp_blocks import connection_tools, mcp_connector
+from backend.triggers.mcp_blocks import ToolsFor, connection_tools, mcp_connector
 
 logger = logging.getLogger(__name__)
 # Блоки, чей вердикт записывается рядом с работой ученика, и вход, где лежит ответ (ADR 0031).
@@ -54,16 +55,23 @@ class Assembly:
         *,
         lock_sessions: Sessions | None = None,
         connections: ConnectionRepository | None = None,
+        moodle_tools: ToolsFor | None = None,
     ) -> None:
         self.registry = registry
         # Подключения к внешним системам; None — в .env нет ключа шифрования (ADR 0028).
         self.connections = connections
+        # Инструменты Moodle преподавателя для опроса по событию (ADR 0034). Не заданы —
+        # берутся из подключений; без подключений опрос пишет понятную ошибку.
+        if moodle_tools is None and connections is not None:
+            moodle_tools = connection_tools(connections)
+        self.moodle_tools = moodle_tools
         self._sessions = sessions
         self.assignments = AssignmentRepository(sessions, lock_sessions=lock_sessions)
         self.users = UserRepository(sessions)
         self.auth = AuthRepository(sessions)
         self.pipelines = PipelineRepository(sessions)
         self.schedules = ScheduleRepository(sessions)
+        self.moodle_watches = MoodleWatchRepository(sessions)
         self.tasks = TaskRepository(sessions)
         self.files = FileRepository(sessions)
         self.results = CabinetResultRepository(sessions)

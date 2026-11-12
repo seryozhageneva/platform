@@ -1,13 +1,17 @@
 <?php
-// Наполняет тестовый Moodle выдуманными данными (задача 23, ADR 0028).
+// Наполняет тестовый Moodle выдуманными данными (задача 23, ADR 0028; оценки — задача 27,
+// ADR 0034).
 //
 // Запускается внутри контейнера Moodle скриптом experiments/moodle_setup.py — вручную его
 // вызывать не нужно. Повторный запуск ничего не дублирует: найденное берётся как есть.
 //
 // Что появляется:
-// - веб-сервисы REST и сервис «platform» с функциями чтения курсов и сдач;
-// - пользователь platform_reader — преподаватель курса, от его имени ходит платформа;
-// - курс PLATFORM-TEST с заданием «Контрольная работа» (файлы, черновики разрешены);
+// - веб-сервисы REST и сервис «platform» с функциями чтения курсов, сдач и оценок и
+//   функцией выставления оценки;
+// - пользователь platform_reader — преподаватель курса, от его имени ходит платформа
+//   (имя осталось с задачи 23: с задачи 27 он и ставит оценки);
+// - курс PLATFORM-TEST с заданием «Контрольная работа» (файлы, черновики разрешены,
+//   оценка до 100 баллов, комментарий к оценке);
 // - четыре выдуманных студента: трое сдали файл, четвёртый оставил черновик.
 //
 // На вход — путь к папке с файлами работ. На выход — одна строка JSON с номерами курса и
@@ -39,10 +43,14 @@ $functions = [
     'core_webservice_get_site_info',
     'mod_assign_get_assignments',
     'mod_assign_get_submissions',
+    'mod_assign_save_grade',
+    // Чтение оценки и комментария — для проверки, что оценка дошла (тесты и ручная проверка).
+    'mod_assign_get_grades',
+    'mod_assign_get_submission_status',
 ];
+$manager = new webservice();
 $service = $DB->get_record('external_services', ['shortname' => 'platform']);
 if (!$service) {
-    $manager = new webservice();
     $serviceid = $manager->add_external_service((object) [
         'name' => 'Платформа учебных пайплайнов',
         'shortname' => 'platform',
@@ -52,10 +60,14 @@ if (!$service) {
         'uploadfiles' => 0,
         'requiredcapability' => '',
     ]);
-    foreach ($functions as $function) {
-        $manager->add_external_function_to_service($function, $serviceid);
-    }
     $service = $DB->get_record('external_services', ['id' => $serviceid], '*', MUST_EXIST);
+}
+// Функции добавляются и в уже созданный сервис: Moodle, наполненный до задачи 27, получает
+// функции оценок при повторном запуске.
+foreach ($functions as $function) {
+    if (!$manager->service_function_exists($function, $service->id)) {
+        $manager->add_external_function_to_service($function, $service->id);
+    }
 }
 
 // --- Пользователь платформы и его права на веб-сервис ---
@@ -97,10 +109,17 @@ if (!$assignment) {
         'assignsubmission_file_maxsizebytes' => 10 * 1024 * 1024,
         'assignsubmission_onlinetext_enabled' => 0,
         'submissiondrafts' => 1,
+        'assignfeedback_comments_enabled' => 1,
+        'grade' => 100,
     ]);
 }
 [$course, $cm] = get_course_and_cm_from_instance($assignment->id, 'assign');
 $assign = new assign(context_module::instance($cm->id), $cm, $course);
+// Комментарий к оценке включается и у задания, созданного до задачи 27.
+$comments = $assign->get_feedback_plugin_by_type('comments');
+if (!$comments->is_enabled()) {
+    $comments->enable();
+}
 
 // Студент и его файл; черновик — работа не сдана, платформа её не должна видеть.
 $students = [

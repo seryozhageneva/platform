@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from backend.core.contracts.pipeline import Pipeline
 from backend.core.contracts.ports import TriggerType
 from backend.models.db import Sessions
-from backend.models.tables import PipelineRow, PipelineVersionRow, ScheduleRow
+from backend.models.tables import MoodleWatchRow, PipelineRow, PipelineVersionRow, ScheduleRow
 
 
 class PipelineRepository:
@@ -56,6 +56,15 @@ class PipelineRepository:
                 await session.execute(
                     update(ScheduleRow)
                     .where(ScheduleRow.pipeline_id == row.id, ScheduleRow.enabled)
+                    .values(enabled=False)
+                )
+            if all(
+                launch.type is not TriggerType.MOODLE_EVENT
+                for launch in pipeline.trigger().launches
+            ):
+                await session.execute(
+                    update(MoodleWatchRow)
+                    .where(MoodleWatchRow.pipeline_id == row.id, MoodleWatchRow.enabled)
                     .values(enabled=False)
                 )
             return row.latest_version

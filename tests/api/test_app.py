@@ -55,6 +55,8 @@ def test_openapi_describes_every_endpoint(client):
         ("PUT", f"{API}/pipelines/{{pipeline_id}}"),
         ("GET", f"{API}/pipelines/{{pipeline_id}}/schedule"),
         ("PUT", f"{API}/pipelines/{{pipeline_id}}/schedule"),
+        ("GET", f"{API}/pipelines/{{pipeline_id}}/moodle-watch"),
+        ("PUT", f"{API}/pipelines/{{pipeline_id}}/moodle-watch"),
         ("POST", f"{API}/pipelines/{{pipeline_id}}/runs"),
         ("GET", f"{API}/runs"),
         ("GET", f"{API}/runs/{{run_id}}"),

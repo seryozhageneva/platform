@@ -339,6 +339,7 @@ def test_builtin_blocks_load_without_problems():
     assert set(registry.manifests) - set(registry.blocks) == {
         "check.code_tests",
         "sink.email",
+        "sink.moodle_grades",
         "sink.telegram",
         "source.moodle_submissions",
     }

@@ -259,7 +259,7 @@ run(inputs, config, context) -> результат
 | `switch` | развилка по значению |
 | `for_each` | выполняет ветку для каждого элемента списка |
 
-**Триггер.** В пайплайне ровно один узел-триггер. У него список способов запуска — один или несколько: `manual`, `student`, `schedule` (с полем `cron`), `moodle_event`. У триггера один выход — `event` типа `Event`.
+**Триггер.** В пайплайне ровно один узел-триггер. У него список способов запуска — один или несколько: `manual`, `student`, `schedule` (с полем `cron`), `moodle_event`. У триггера один выход — `event` типа `Event`. У `moodle_event` настройка `poll_minutes` — как часто опрашивать Moodle (по умолчанию 5); запуск по событию кладёт в `payload` курс, задание и номера новых сдач (`moodle_course_id`, `moodle_assignment_id`, `moodle_submission_ids`), подробности — в [ADR 0034](adr/0034-moodle-event-and-grades.md).
 
 ```json
 {"id": "start", "type": "trigger", "launches": [

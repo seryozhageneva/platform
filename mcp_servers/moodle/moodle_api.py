@@ -1,4 +1,5 @@
-"""Запросы к Moodle через Web Services (REST) — только чтение (задача 23, ADR 0028).
+"""Запросы к Moodle через Web Services (REST): чтение сдач (задача 23, ADR 0028) и
+выставление оценки (задача 27, ADR 0034).
 
 Адрес сайта и токен приходят от того, кто запускает адаптер. Токен — секрет: он уходит только
 на сам сайт Moodle и никогда не попадает в текст ошибок.
@@ -34,6 +35,9 @@ _ERRORS = {
     "nopermissions": "у пользователя токена нет прав на это задание",
     "invalidrecord": "в Moodle нет такого курса или задания",
 }
+
+# Формат комментария к оценке: простой текст. Moodle покажет его как есть, без разметки.
+FORMAT_PLAIN = 2
 
 
 class MoodleError(Exception):
@@ -125,43 +129,108 @@ class MoodleApi:
             raise MoodleError("файл работы не скачан: Moodle недоступен") from None
         return bytes(content)
 
-    async def submitted_files(self, course_id: int, assignment_id: int) -> list[MoodleFile]:
-        """Файлы сданных работ задания; черновики и пустые сдачи не берутся."""
+    async def _assignment(self, course_id: int, assignment_id: int) -> dict[str, Any]:
+        """Задание курса; ошибка, если его нет или к нему нет доступа."""
         assignments = await self.call("mod_assign_get_assignments", {"courseids[0]": course_id})
         courses = assignments.get("courses", []) if isinstance(assignments, dict) else []
-        known = {a.get("id") for course in courses for a in course.get("assignments", [])}
-        if assignment_id not in known:
-            raise MoodleError("в этом курсе Moodle нет такого задания или к нему нет доступа")
+        for course in courses:
+            for assignment in course.get("assignments", []):
+                if assignment.get("id") == assignment_id:
+                    return assignment
+        raise MoodleError("в этом курсе Moodle нет такого задания или к нему нет доступа")
 
+    async def _submitted(self, course_id: int, assignment_id: int) -> list[dict[str, Any]]:
+        """Сдачи задания со статусом «сдано»; черновики и пустые сдачи не берутся."""
+        await self._assignment(course_id, assignment_id)
         result = await self.call("mod_assign_get_submissions", {"assignmentids[0]": assignment_id})
+        return [
+            submission
+            for assignment in result.get("assignments", [])
+            for submission in assignment.get("submissions", [])
+            if submission.get("status") == "submitted"
+        ]
+
+    async def submission_list(self, course_id: int, assignment_id: int) -> list[dict[str, int]]:
+        """Номера сданных работ и время сдачи — без файлов, для опроса Moodle."""
+        return [
+            {
+                "submission_id": int(submission["id"]),
+                "user_id": int(submission["userid"]),
+                "submitted_at": int(submission.get("timemodified") or 0),
+            }
+            for submission in await self._submitted(course_id, assignment_id)
+        ]
+
+    async def submitted_files(
+        self, course_id: int, assignment_id: int, only: set[int] | None = None
+    ) -> list[MoodleFile]:
+        """Файлы сданных работ задания; `only` — только эти номера сдач."""
         files: list[MoodleFile] = []
         total = 0
-        for assignment in result.get("assignments", []):
-            for submission in assignment.get("submissions", []):
-                if submission.get("status") != "submitted":
-                    continue
-                for plugin in submission.get("plugins", []):
-                    for area in plugin.get("fileareas", []):
-                        for item in area.get("files", []):
-                            name = PurePosixPath(str(item.get("filename", ""))).name
-                            if not name or not item.get("fileurl"):
-                                continue
-                            content = await self.download(item["fileurl"], MAX_FILE_SIZE)
-                            total += len(content)
-                            if total > MAX_TOTAL_SIZE:
-                                raise MoodleError("работы задания вместе больше 50 МиБ")
-                            files.append(
-                                MoodleFile(
-                                    name=name,
-                                    kind=file_kind(name),
-                                    media_type=media_type(name, item.get("mimetype")),
-                                    content=content,
-                                    meta={
-                                        "moodle_user_id": submission.get("userid"),
-                                        "moodle_submission_id": submission.get("id"),
-                                        "moodle_assignment_id": assignment_id,
-                                        "submitted_at": submission.get("timemodified"),
-                                    },
-                                )
+        for submission in await self._submitted(course_id, assignment_id):
+            if only is not None and submission.get("id") not in only:
+                continue
+            for plugin in submission.get("plugins", []):
+                for area in plugin.get("fileareas", []):
+                    for item in area.get("files", []):
+                        name = PurePosixPath(str(item.get("filename", ""))).name
+                        if not name or not item.get("fileurl"):
+                            continue
+                        content = await self.download(item["fileurl"], MAX_FILE_SIZE)
+                        total += len(content)
+                        if total > MAX_TOTAL_SIZE:
+                            raise MoodleError("работы задания вместе больше 50 МиБ")
+                        files.append(
+                            MoodleFile(
+                                name=name,
+                                kind=file_kind(name),
+                                media_type=media_type(name, item.get("mimetype")),
+                                content=content,
+                                meta={
+                                    "moodle_user_id": submission.get("userid"),
+                                    "moodle_submission_id": submission.get("id"),
+                                    "moodle_course_id": course_id,
+                                    "moodle_assignment_id": assignment_id,
+                                    "submitted_at": submission.get("timemodified"),
+                                },
                             )
+                        )
         return files
+
+    async def save_grade(
+        self,
+        course_id: int,
+        assignment_id: int,
+        user_id: int,
+        *,
+        score: float,
+        max_score: float,
+        comment: str,
+    ) -> float:
+        """Ставит оценку и комментарий; баллы пересчитываются в шкалу задания Moodle."""
+        if max_score <= 0 or not 0 <= score <= max_score:
+            raise MoodleError("баллы оценки должны быть от 0 до максимума, а максимум больше 0")
+        assignment = await self._assignment(course_id, assignment_id)
+        top = float(assignment.get("grade") or 0)
+        if top <= 0:
+            raise MoodleError(
+                "задание Moodle оценивается не баллами (шкала или без оценки): "
+                "платформа ставит только баллы"
+            )
+        grade = round(score / max_score * top, 2)
+        await self.call(
+            "mod_assign_save_grade",
+            {
+                "assignmentid": assignment_id,
+                "userid": user_id,
+                "grade": grade,
+                # -1 — последняя попытка студента; новую попытку не открываем.
+                "attemptnumber": -1,
+                "addattempt": 0,
+                "workflowstate": "",
+                "applytoall": 0,
+                "plugindata[assignfeedbackcomments_editor][text]": comment,
+                "plugindata[assignfeedbackcomments_editor][format]": FORMAT_PLAIN,
+            },
+        )
+        return grade

@@ -1,13 +1,19 @@
-# Черновик: описание блока без кода.
+# Блок-обёртка над инструментом MCP-сервера Moodle (runtime mcp, ADR 0034).
 id: sink.moodle_grades
 version: 0.1.0
 name: "Получатель: оценки в Moodle"
-description: Выставляет оценку и комментарий за работу в Moodle.
+description: >-
+  Выставляет оценку и комментарий за работу из Moodle. Баллы вердикта пересчитываются в
+  шкалу задания Moodle. Студент видит оценку в Moodle, и Moodle сам его уведомляет.
 author: platform
 category: sink
 inputs:
+  # Работа из «Источник: работы из Moodle»: чья она и по какому заданию — в meta файла.
   - {name: work, title: За какую работу, type: File}
   - {name: verdict, title: Оценка, type: Verdict}
+  # Текст комментария; не задан — берётся комментарий из вердикта.
   - {name: comment, title: Комментарий, type: Data, required: false}
+outcomes: [saved]
 runtime: {type: mcp, server: moodle, tool: save_grade}
+# Оценка видна студенту — действие с последствиями: перед блоком нужно Подтверждение.
 side_effects: true

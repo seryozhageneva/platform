@@ -70,11 +70,16 @@ SUBMISSIONS = [
 class FakeMoodle:
     """Отвечает как Moodle; запоминает, куда и с каким токеном ходили."""
 
-    def __init__(self, submissions: list[dict] | None = None, token: str = TOKEN) -> None:
+    def __init__(
+        self, submissions: list[dict] | None = None, token: str = TOKEN, max_grade: float = 100
+    ) -> None:
         self.submissions = SUBMISSIONS if submissions is None else submissions
         self.token = token
+        self.max_grade = max_grade
         self.requests: list[httpx.Request] = []
         self.files = dict(FILES)
+        # Выставленные оценки: номер студента → поля запроса mod_assign_save_grade.
+        self.grades: dict[int, dict[str, str]] = {}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -95,7 +100,14 @@ class FakeMoodle:
                 return httpx.Response(
                     200,
                     json={
-                        "courses": [{"id": 2, "assignments": [{"id": 1, "name": "Контрольная"}]}],
+                        "courses": [
+                            {
+                                "id": 2,
+                                "assignments": [
+                                    {"id": 1, "name": "Контрольная", "grade": self.max_grade}
+                                ],
+                            }
+                        ],
                         "warnings": [],
                     },
                 )
@@ -107,6 +119,9 @@ class FakeMoodle:
                         "warnings": [],
                     },
                 )
+            if form["wsfunction"] == "mod_assign_save_grade":
+                self.grades[int(form["userid"])] = form
+                return httpx.Response(200, content=b"null")
             return httpx.Response(200, json={"exception": "x", "errorcode": "accessexception"})
         if request.url.path.startswith("/webservice/pluginfile.php/"):
             if request.url.params.get("token") != self.token:

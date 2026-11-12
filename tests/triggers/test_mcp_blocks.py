@@ -58,7 +58,9 @@ def test_client_has_contract_interface_and_reports_read_only():
     assert isinstance(client, ToolClient)
     tools = asyncio.run(client.list_tools())
     assert [(tool.server, tool.name, tool.read_only) for tool in tools] == [
-        ("moodle", "get_submissions", True)
+        ("moodle", "get_submissions", True),
+        ("moodle", "list_submissions", True),
+        ("moodle", "save_grade", False),
     ]
 
 
@@ -172,6 +174,75 @@ def test_moodle_block_saves_works_and_passes_file_refs():
 
     again = asyncio.run(block.run({"event": None}, CONFIG, context(store)))
     assert [item["id"] for item in again.outputs["works"]] == [w.id for w in works]
+
+
+def _moodle_event(numbers, course_id=2, assignment_id=1):
+    return {
+        "trigger": "moodle_event",
+        "occurred_at": "2026-11-12T10:00:00Z",
+        "payload": {
+            "moodle_course_id": course_id,
+            "moodle_assignment_id": assignment_id,
+            "moodle_submission_ids": numbers,
+        },
+    }
+
+
+def test_launch_by_moodle_event_takes_only_submissions_from_event():
+    block = registry_with(fake_server()).blocks["source.moodle_submissions"]
+    result = asyncio.run(block.run({"event": _moodle_event([1, 3])}, CONFIG, context(FakeStore())))
+    assert [work["name"] for work in result.outputs["works"]] == ["work1.pdf", "solution.py"]
+    assert result.outputs["works"][0]["meta"]["moodle_course_id"] == 2
+
+
+def test_moodle_event_for_another_assignment_is_refused():
+    block = registry_with(fake_server()).blocks["source.moodle_submissions"]
+    with pytest.raises(RuntimeError, match="по другому курсу или заданию"):
+        asyncio.run(
+            block.run({"event": _moodle_event([1], assignment_id=9)}, CONFIG, context(FakeStore()))
+        )
+
+
+def _graded_work(**meta):
+    base = {"moodle_course_id": 2, "moodle_assignment_id": 1, "moodle_user_id": 4}
+    return {"id": "f", "name": "work1.pdf", "kind": "document", "meta": {**base, **meta}}
+
+
+def test_grade_goes_to_student_of_the_work_with_edited_comment():
+    moodle = FakeMoodle(max_grade=10)
+    block = registry_with(fake_server(moodle)).blocks["sink.moodle_grades"]
+    inputs = {
+        "work": _graded_work(),
+        "verdict": {"correct": False, "score": 1, "max_score": 2, "comment": "из вердикта"},
+        "comment": {"text": "Допишите вывод."},
+    }
+    result = asyncio.run(block.run(inputs, {}, context(FakeStore())))
+    assert result.outcome == "saved"
+    assert result.events[0].type == "moodle_grade_saved"
+    assert result.events[0].data == {"moodle_user_id": 4, "grade": 5.0}
+    sent = moodle.grades[4]
+    assert (sent["grade"], sent["plugindata[assignfeedbackcomments_editor][text]"]) == (
+        "5.0",
+        "Допишите вывод.",
+    )
+
+
+def test_verdict_without_points_gives_full_or_zero_and_its_own_comment():
+    moodle = FakeMoodle()
+    block = registry_with(fake_server(moodle)).blocks["sink.moodle_grades"]
+    inputs = {"work": _graded_work(), "verdict": {"correct": True, "comment": "Верно."}}
+    asyncio.run(block.run(inputs, {}, context(FakeStore())))
+    assert moodle.grades[4]["grade"] == "100.0"
+    assert moodle.grades[4]["plugindata[assignfeedbackcomments_editor][text]"] == "Верно."
+
+
+def test_grade_needs_work_from_moodle():
+    moodle = FakeMoodle()
+    block = registry_with(fake_server(moodle)).blocks["sink.moodle_grades"]
+    inputs = {"work": {"id": "f", "name": "a.pdf", "meta": {}}, "verdict": {"correct": True}}
+    with pytest.raises(RuntimeError, match="только за работу из"):
+        asyncio.run(block.run(inputs, {}, context(FakeStore())))
+    assert moodle.grades == {}
 
 
 def test_no_works_is_empty_outcome():
