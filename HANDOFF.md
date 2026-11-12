@@ -21,9 +21,11 @@ _Обновлено: 2026-11-12, агент: Codex_
   `docs/examples/pipelines/weekly-digest-demo.json`. Из полного сценария 4 убран `group_id`.
 - Решения записаны в ADR 0032, проверка часового пояса добавлена в Dockerfile. Контракт
   блоков сохранён. С разрешения автора добавлена одна зависимость `cronsim` (в lock 2.8).
-- `PLATFORM_TEST_DOCKER=1 uv --no-cache run --no-sync pytest -q` — 918 passed,
+- Ревью `reviewer`: добавлен сброс текстового параметра расписания к значению по умолчанию.
+  Отдельный тест проверяет, что сброс и явная пустая строка сохраняются по-разному.
+- `PLATFORM_TEST_DOCKER=1 uv --no-cache run --no-sync pytest -q -rs` — 918 passed,
   2 skipped (тестовый Moodle был остановлен). Ruff и lint-imports прошли. Фронтенд —
-  37 тестов, `api:check`, `lint` и `build` прошли.
+  38 тестов, `api:check`, `lint` и `build` прошли. Серверный образ `platform` собрался.
 
 ## Сделано в задаче 24b
 
