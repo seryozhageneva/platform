@@ -19,6 +19,7 @@ from backend.api import (
     connections,
     files,
     lessons,
+    moodle_watches,
     pipelines,
     results,
     runs,
@@ -73,6 +74,7 @@ def create_app(
     api.include_router(results.router)
     api.include_router(runs.router)
     api.include_router(schedules.router)
+    api.include_router(moodle_watches.router)
     api.include_router(tasks.router)
 
     @api.get("/health", tags=["Служебное"], summary="Сервер работает")

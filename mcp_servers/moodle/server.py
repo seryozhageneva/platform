@@ -1,4 +1,4 @@
-"""MCP-сервер Moodle: инструменты чтения работ (задача 23, ADR 0028).
+"""MCP-сервер Moodle: чтение работ (задача 23, ADR 0028) и оценки (задача 27, ADR 0034).
 
 Платформа запускает сервер дочерней программой (`python -m mcp_servers.moodle`) и говорит
 с ним по stdin/stdout. Адрес сайта и токен берутся из переменных окружения `MOODLE_URL` и
@@ -23,6 +23,10 @@ from pydantic import BaseModel, Field
 from mcp_servers.moodle.moodle_api import MoodleApi, MoodleError
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True)
+# Оценка меняет Moodle: студент её видит. Повтор с теми же данными ставит ту же оценку.
+GRADE = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True
+)
 
 
 class WorkFile(BaseModel):
@@ -44,11 +48,32 @@ class Submissions(BaseModel):
     outcome: Literal["ok", "empty"]
 
 
+class SubmissionMark(BaseModel):
+    """Сданная работа без файла: номер сдачи, номер студента и время сдачи."""
+
+    submission_id: int
+    user_id: int
+    submitted_at: int = Field(description="Время последнего изменения сдачи, Unix-время")
+
+
+class SubmissionList(BaseModel):
+    submissions: list[SubmissionMark]
+    outcome: Literal["ok", "empty"]
+
+
+class SavedGrade(BaseModel):
+    grade: float = Field(description="Оценка в шкале задания Moodle")
+    outcome: Literal["saved"]
+
+
 def build_server(make_api: Callable[[], MoodleApi]) -> MCPServer:
     """Сервер с инструментами; `make_api` даёт клиента Moodle на один вызов."""
     server = MCPServer(
         "moodle",
-        instructions="Чтение сданных работ из Moodle. Ничего в Moodle не меняет.",
+        instructions=(
+            "Чтение сданных работ из Moodle и выставление оценок. Меняет Moodle только "
+            "инструмент save_grade."
+        ),
     )
 
     @server.tool(
@@ -56,13 +81,16 @@ def build_server(make_api: Callable[[], MoodleApi]) -> MCPServer:
         title="Сданные работы задания",
         description=(
             "Файлы работ, сданных по заданию курса Moodle. Черновики не берутся. "
-            "Исход empty — сданных работ нет."
+            "submission_ids — только эти сдачи. Исход empty — сданных работ нет."
         ),
         annotations=READ_ONLY,
     )
-    async def get_submissions(course_id: int, assignment_id: int) -> Submissions:
+    async def get_submissions(
+        course_id: int, assignment_id: int, submission_ids: list[int] | None = None
+    ) -> Submissions:
+        only = None if submission_ids is None else set(submission_ids)
         try:
-            files = await make_api().submitted_files(course_id, assignment_id)
+            files = await make_api().submitted_files(course_id, assignment_id, only)
         except MoodleError as error:
             raise ToolError(str(error)) from None
         works = [
@@ -77,6 +105,53 @@ def build_server(make_api: Callable[[], MoodleApi]) -> MCPServer:
             for file in files
         ]
         return Submissions(works=works, outcome="ok" if works else "empty")
+
+    @server.tool(
+        name="list_submissions",
+        title="Список сданных работ",
+        description=(
+            "Номера сданных работ задания, номера студентов и время сдачи — без файлов. "
+            "Черновики не берутся. Исход empty — сданных работ нет."
+        ),
+        annotations=READ_ONLY,
+    )
+    async def list_submissions(course_id: int, assignment_id: int) -> SubmissionList:
+        try:
+            found = await make_api().submission_list(course_id, assignment_id)
+        except MoodleError as error:
+            raise ToolError(str(error)) from None
+        marks = [SubmissionMark(**item) for item in found]
+        return SubmissionList(submissions=marks, outcome="ok" if marks else "empty")
+
+    @server.tool(
+        name="save_grade",
+        title="Выставить оценку",
+        description=(
+            "Ставит студенту оценку и комментарий за работу по заданию Moodle. Баллы "
+            "score из max_score пересчитываются в шкалу задания. Студент увидит оценку."
+        ),
+        annotations=GRADE,
+    )
+    async def save_grade(
+        course_id: int,
+        assignment_id: int,
+        user_id: int,
+        score: float,
+        max_score: float,
+        comment: str = "",
+    ) -> SavedGrade:
+        try:
+            grade = await make_api().save_grade(
+                course_id,
+                assignment_id,
+                user_id,
+                score=score,
+                max_score=max_score,
+                comment=comment,
+            )
+        except MoodleError as error:
+            raise ToolError(str(error)) from None
+        return SavedGrade(grade=grade, outcome="saved")
 
     return server
 

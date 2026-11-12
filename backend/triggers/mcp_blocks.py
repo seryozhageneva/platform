@@ -24,8 +24,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from backend.core.contracts.interfaces import PlatformStore
 from backend.core.contracts.manifest import Manifest, McpRuntime
-from backend.core.contracts.ports import FileKind, PortType
-from backend.core.contracts.run import BlockRun, Done, RunContext
+from backend.core.contracts.ports import FileKind, PortType, TriggerType
+from backend.core.contracts.run import BlockEvent, BlockRun, Done, RunContext
 from backend.mcp_client.client import (
     BUILTIN_SERVERS,
     McpToolClient,
@@ -121,6 +121,10 @@ def mcp_connector(
                 arguments = _notification_arguments(
                     runtime.server, destination, inputs["content"], config
                 )
+            elif (runtime.server, runtime.tool) == ("moodle", "get_submissions"):
+                arguments = _submission_arguments(config, inputs.get("event"))
+            elif (runtime.server, runtime.tool) == ("moodle", "save_grade"):
+                arguments = _grade_arguments(inputs)
             tools = await tools_for(owner_id, runtime.server)
             try:
                 answer = await tools.call_tool(
@@ -131,11 +135,85 @@ def mcp_connector(
                 )
             except ToolCallError as error:
                 raise RuntimeError(str(error)) from None
+            if (runtime.server, runtime.tool) == ("moodle", "save_grade"):
+                return _grade_result(manifest, answer, arguments)
             return await _as_result(manifest, answer, store)
 
         return run
 
     return connect
+
+
+def _submission_arguments(config: dict[str, Any], event: Any) -> dict[str, Any]:
+    """Запуск по событию Moodle берёт только сдачи из события, остальные — все (ADR 0034)."""
+    arguments = dict(config)
+    payload = event.get("payload") if isinstance(event, dict) else None
+    if not (isinstance(event, dict) and event.get("trigger") == TriggerType.MOODLE_EVENT.value):
+        return arguments
+    if not isinstance(payload, dict):
+        raise RuntimeError("в событии Moodle нет номеров сдач")
+    # Опрос берёт курс и задание из настроек этого же узла, так что они совпадают.
+    if (payload.get("moodle_course_id"), payload.get("moodle_assignment_id")) != (
+        config.get("course_id"),
+        config.get("assignment_id"),
+    ):
+        raise RuntimeError("событие Moodle пришло по другому курсу или заданию")
+    numbers = payload.get("moodle_submission_ids")
+    if not isinstance(numbers, list) or not all(_is_int(number) for number in numbers):
+        raise RuntimeError("в событии Moodle нет номеров сдач")
+    arguments["submission_ids"] = numbers
+    return arguments
+
+
+def _grade_arguments(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Чья работа и по какому заданию — из `meta` файла; баллы — из вердикта."""
+    work = inputs.get("work")
+    meta = work.get("meta") if isinstance(work, dict) else None
+    keys = ("moodle_course_id", "moodle_assignment_id", "moodle_user_id")
+    if not isinstance(meta, dict) or not all(_is_int(meta.get(key)) for key in keys):
+        raise RuntimeError(
+            "оценку в Moodle можно поставить только за работу из «Источник: работы из Moodle»"
+        )
+    verdict = inputs.get("verdict")
+    if not isinstance(verdict, dict):
+        raise RuntimeError("для оценки в Moodle нужен вердикт")
+    score, max_score = verdict.get("score"), verdict.get("max_score")
+    if not (_is_number(score) and _is_number(max_score)):
+        # Вердикт без баллов — «верно» или «неверно»: полный балл или ноль.
+        score, max_score = (1 if verdict.get("correct") else 0), 1
+    comment = inputs.get("comment")
+    text = comment.get("text") if isinstance(comment, dict) else comment
+    if text is None:
+        text = verdict.get("comment") or ""
+    if not isinstance(text, str):
+        raise RuntimeError("комментарий к оценке должен быть текстом")
+    return {
+        "course_id": meta["moodle_course_id"],
+        "assignment_id": meta["moodle_assignment_id"],
+        "user_id": meta["moodle_user_id"],
+        "score": score,
+        "max_score": max_score,
+        "comment": text,
+    }
+
+
+def _grade_result(manifest: Manifest, answer: Any, arguments: dict[str, Any]) -> Done:
+    if not isinstance(answer, dict) or answer.get("outcome") not in manifest.outcomes:
+        raise RuntimeError("MCP-сервер Moodle не подтвердил оценку")
+    grade = answer.get("grade")
+    if not _is_number(grade):
+        raise RuntimeError("MCP-сервер Moodle вернул оценку в неверном формате")
+    data = {"moodle_user_id": arguments["user_id"], "grade": grade}
+    event = BlockEvent(type="moodle_grade_saved", data=data)
+    return Done(outcome=answer["outcome"], events=[event])
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def _notification_arguments(
@@ -230,6 +308,6 @@ async def _save_file(store: PlatformStore, port: str, item: Any) -> dict[str, An
         )
     except ValidationError:
         raise RuntimeError(f"выход «{port}»: файл не сохранён") from None
-    # Номер работы во внешней системе нужен дальше (оценка в Moodle — задача 28), а в
+    # Номер работы во внешней системе нужен дальше (оценка в Moodle — ADR 0034), а в
     # таблице файлов его нет: он едет в описании ссылки внутри запуска.
     return ref.model_copy(update={"meta": {**ref.meta, **meta}}).model_dump(mode="json")

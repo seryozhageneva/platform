@@ -2,7 +2,8 @@
 
 Таблицы: люди, группы и их состав, банк задач, пайплайны и их версии, назначения,
 запуски, журнал событий, журнал вызовов модели (ADR 0012), работы учеников (ADR 0016),
-файлы (ADR 0023), результаты кабинета (ADR 0026) и подключения к внешним системам (ADR 0028).
+файлы (ADR 0023), результаты кабинета (ADR 0026), подключения к внешним системам (ADR 0028),
+расписания (ADR 0032) и наблюдение за Moodle с обработанными сдачами (ADR 0034).
 Остальные сущности из
 docs/vision.md добавляются миграциями в задачах, где они впервые нужны. После правки этого
 файла нужна новая миграция: тест `tests/models/test_migrations.py` падает, если забыли
@@ -235,6 +236,36 @@ class ScheduleRow(Base):
     enabled: Mapped[bool] = mapped_column(server_default=text("false"))
     params: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default=EMPTY_JSON)
     last_fired_at: Mapped[datetime | None]
+
+
+class MoodleWatchRow(Base):
+    """Запуск по событию Moodle: включён ли опрос, параметры и последний опрос (ADR 0034)."""
+
+    __tablename__ = "moodle_watches"
+
+    pipeline_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(server_default=text("false"))
+    params: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default=EMPTY_JSON)
+    last_polled_at: Mapped[datetime | None]
+    # Текст последней ошибки опроса для преподавателя; пусто — опрос прошёл.
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class MoodleSeenRow(Base):
+    """Сдача Moodle, для которой уже создан запуск. Изменённая сдача — новая строка."""
+
+    __tablename__ = "moodle_seen_submissions"
+
+    pipeline_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), primary_key=True
+    )
+    submission_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Время сдачи из Moodle (Unix-время): после доработки оно меняется.
+    submitted_at: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class AssignmentRow(Base):

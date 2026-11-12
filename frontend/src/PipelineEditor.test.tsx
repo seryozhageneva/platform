@@ -31,6 +31,25 @@ it("сохраняет время в графе и открывает панел
   expect(settings).toHaveBeenCalledWith("teacher", "saved");
 });
 
+it("включает запуск по событию Moodle с частотой опроса и открывает его панель", async () => {
+  const save = vi.spyOn(api, "savePipeline").mockResolvedValue({ id: "saved", version: 1, warnings: [] });
+  const watch = vi.spyOn(api, "moodleWatch").mockResolvedValue({
+    enabled: false, params: {}, poll_minutes: 10, seen_submissions: 0,
+  });
+  render(<PipelineEditor initial={{ ...newPipeline(), name: "Проверка" }} catalog={[]} accountId="teacher"
+    onSaved={vi.fn()} close={vi.fn()} onSessionChange={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Старт" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Запускать, когда в Moodle сдали работу" }));
+  fireEvent.change(screen.getByLabelText("Проверять Moodle раз в, минут"), { target: { value: "10" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  await screen.findByRole("button", { name: "Сохранить запуск по событию Moodle" });
+  expect(save.mock.calls[0]?.[1].nodes[0]).toMatchObject({
+    launches: [{ type: "student" }, { type: "moodle_event", settings: { poll_minutes: 10 } }],
+  });
+  expect(watch).toHaveBeenCalledWith("teacher", "saved");
+  expect(screen.getByText(/раз в 10 мин/)).toBeTruthy();
+});
+
 it("сохраняет, показывает предупреждение, оставляет правки после отказа и повторяет сохранение той же версии графа", async () => {
   const warning = { node: "start", code: "warning", message: "Предупреждение от сервера" };
   const issue = { node: "start", code: "invalid", message: "Проверьте старт" };

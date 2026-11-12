@@ -27,6 +27,8 @@ TABLES = {
     "cabinet_results",
     "connections",
     "schedules",
+    "moodle_watches",
+    "moodle_seen_submissions",
 }
 
 

@@ -21,6 +21,8 @@ from backend.models.submissions import SubmissionGrade
 from backend.models.tables import (
     ApprovalRow,
     EventRow,
+    MoodleSeenRow,
+    MoodleWatchRow,
     PipelineRow,
     PipelineVersionRow,
     RunRow,
@@ -44,6 +46,10 @@ _COLUMNS = {
 
 class ScheduleChanged(Exception):
     """Расписание уже сработало, изменилось или выключено."""
+
+
+class MoodleWatchChanged(Exception):
+    """Наблюдение за Moodle выключено, изменилось, или эти сдачи уже взял другой запуск."""
 
 
 class PgRunStore:
@@ -228,11 +234,17 @@ class PgRunStore:
         *,
         schedule_minute: datetime | None = None,
         schedule_params: dict[str, Any] | None = None,
+        moodle_marks: list[tuple[int, int]] | None = None,
+        moodle_params: dict[str, Any] | None = None,
     ) -> AsyncIterator[None]:
-        """Откатывает запуск, если постановка задания в очередь не удалась."""
+        """Откатывает запуск, если постановка задания в очередь не удалась.
+
+        `moodle_marks` — сдачи Moodle этого запуска (ADR 0034): они отмечаются обработанными
+        в той же транзакции, что и запуск.
+        """
         run_id = uuid.UUID(state.run_id)
         async with self._sessions.begin() as session:
-            if schedule_minute is not None:
+            if schedule_minute is not None or moodle_marks is not None:
                 pipeline_id = uuid.UUID(state.pipeline_id)
                 version = await session.scalar(
                     select(PipelineRow.latest_version)
@@ -240,7 +252,18 @@ class PgRunStore:
                     .with_for_update()
                 )
                 if version != state.pipeline_version:
-                    raise ScheduleChanged
+                    raise ScheduleChanged if moodle_marks is None else MoodleWatchChanged
+            if moodle_marks is not None:
+                watching = await session.scalar(
+                    select(MoodleWatchRow.pipeline_id).where(
+                        MoodleWatchRow.pipeline_id == pipeline_id,
+                        MoodleWatchRow.enabled,
+                        MoodleWatchRow.params == moodle_params,
+                    )
+                )
+                if watching is None:
+                    raise MoodleWatchChanged
+            if schedule_minute is not None:
                 claimed = await session.scalar(
                     update(ScheduleRow)
                     .where(
@@ -261,6 +284,25 @@ class PgRunStore:
             await session.execute(self._insert_state(state)[0])
             session.add(EventRow(run_id=run_id, node_id=trigger_id, type="run_queued"))
             await session.flush()
+            if moodle_marks:
+                inserted = await session.scalars(
+                    insert(MoodleSeenRow)
+                    .values(
+                        [
+                            {
+                                "pipeline_id": pipeline_id,
+                                "submission_id": number,
+                                "submitted_at": at,
+                                "run_id": run_id,
+                            }
+                            for number, at in moodle_marks
+                        ]
+                    )
+                    .on_conflict_do_nothing()
+                    .returning(MoodleSeenRow.submission_id)
+                )
+                if len(list(inserted)) != len(moodle_marks):
+                    raise MoodleWatchChanged
             yield
 
     async def queued_trigger(self, run_id: uuid.UUID) -> str | None:

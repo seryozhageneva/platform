@@ -19,6 +19,7 @@ from backend.core.contracts.state import RunState
 from backend.core.contracts.wiring import Problem
 from backend.core.validator import validate
 from backend.triggers.assembly import Assembly
+from backend.triggers.moodle_graph import moodle_problems
 from backend.triggers.queue import EnqueueLaunch
 
 _TYPE_NAMES = {
@@ -111,9 +112,13 @@ def launch_problems(
         for node, _ in pipeline.walk()
         if isinstance(node, BlockNode) and node.block not in assembly.registry.blocks
     ]
-    return not_callable or [
-        Problem(start.id, "bad_param", text) for text in param_problems(pipeline, params)
-    ]
+    if not_callable:
+        return not_callable
+    if trigger is TriggerType.MOODLE_EVENT:
+        graph_problems = moodle_problems(pipeline)
+        if graph_problems:
+            return graph_problems
+    return [Problem(start.id, "bad_param", text) for text in param_problems(pipeline, params)]
 
 
 def param_problems(pipeline: Pipeline, given: Mapping[str, Any]) -> list[str]:

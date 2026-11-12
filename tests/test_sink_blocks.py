@@ -47,7 +47,7 @@ def call(block, inputs, config, store, student_id=None):
     return asyncio.run(block(inputs, config, context(store, student_id)))
 
 
-@pytest.mark.parametrize("name", ["cabinet", "task_bank", "file"])
+@pytest.mark.parametrize("name", ["cabinet", "task_bank", "file", "moodle_grades"])
 def test_manifest_matches_its_example(name):
     assert load_manifest(ROOT / f"blocks/sink/{name}/block.yaml") == load_manifest(
         ROOT / f"docs/examples/manifests/sink.{name}.yaml"

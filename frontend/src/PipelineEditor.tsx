@@ -104,6 +104,7 @@ export function PipelineEditor({ initial, catalog, id, version, accountId, onSes
   const manifest = node?.type === "block" ? byId.get(node.block) : undefined;
   const savedTrigger = savedGraph.nodes.find((item) => item.type === "trigger");
   const savedSchedule = savedTrigger?.launches.find((launch) => launch.type === "schedule");
+  const savedMoodle = savedTrigger?.launches.find((launch) => launch.type === "moodle_event");
 
   function change(next: Pipeline) {
     setGraph(next);
@@ -182,6 +183,9 @@ export function PipelineEditor({ initial, catalog, id, version, accountId, onSes
     {saved && savedSchedule && <TeacherSchedule key={`${saved.id}:${saved.version}`}
       accountId={accountId} pipelineId={saved.id} version={saved.version} params={savedGraph.params}
       disabled={pending || !sameGraph(graph, savedGraph)} onSessionChange={onSessionChange} />}
+    {saved && savedMoodle && <TeacherSchedule kind="moodle" key={`moodle:${saved.id}:${saved.version}`}
+      accountId={accountId} pipelineId={saved.id} version={saved.version} params={savedGraph.params}
+      disabled={pending || !sameGraph(graph, savedGraph)} onSessionChange={onSessionChange} />}
     <fieldset className="pipeline-editor" disabled={pending || Boolean(readOnly)}>
       <label>Название пайплайна<input value={graph.name}
         onChange={(event) => change({ ...graph, name: event.target.value })} /></label>
@@ -214,7 +218,9 @@ export function PipelineEditor({ initial, catalog, id, version, accountId, onSes
           </> : node?.type === "trigger"
             ? <>
               <p>Запуск: {node.launches.map((launch) => launch.type === "student" ? "ученик открыл урок"
-                : launch.type === "schedule" ? "по расписанию" : launch.type).join(", ")}.</p>
+                : launch.type === "schedule" ? "по расписанию"
+                : launch.type === "moodle_event" ? "сдана работа в Moodle"
+                : launch.type === "manual" ? "вручную" : launch.type).join(", ")}.</p>
               <label>Расписание (cron, время Москвы)
                 <input placeholder="0 18 * * 5"
                   value={node.launches.find((launch) => launch.type === "schedule")?.cron ?? ""}
@@ -228,10 +234,36 @@ export function PipelineEditor({ initial, catalog, id, version, accountId, onSes
                   }} />
               </label>
               <p>Например, 0 18 * * 5 — по пятницам в 18:00.</p>
+              <MoodleLaunch launches={node.launches}
+                change={(launches) => change(updateNode(graph, { ...node, launches }))} />
             </>
             : <p>Выберите блок на схеме.</p>}
         </aside>
       </div>
     </fieldset>
+  </>;
+}
+
+type Launches = Extract<Pipeline["nodes"][number], { type: "trigger" }>["launches"];
+
+// Запуск по событию Moodle: платформа опрашивает Moodle раз в несколько минут (ADR 0034).
+function MoodleLaunch({ launches, change }: { launches: Launches; change: (next: Launches) => void }) {
+  const moodle = launches.find((launch) => launch.type === "moodle_event");
+  const other = launches.filter((launch) => launch.type !== "moodle_event");
+  const minutes = moodle?.settings?.poll_minutes;
+  return <>
+    <label><input type="checkbox" checked={Boolean(moodle)} disabled={Boolean(moodle) && other.length === 0}
+      onChange={(event) => change(event.target.checked
+        ? [...other, { type: "moodle_event", settings: { poll_minutes: 5 } }]
+        : other)} /> Запускать, когда в Moodle сдали работу</label>
+    {moodle && <label>Проверять Moodle раз в, минут
+      <input type="number" min={1} max={1440} step={1}
+        value={typeof minutes === "number" ? String(minutes) : ""}
+        onChange={(event) => {
+          const value = event.target.value;
+          const settings = { ...moodle.settings, poll_minutes: value === "" ? 5 : Number(value) };
+          change([...other, { ...moodle, settings }]);
+        }} />
+    </label>}
   </>;
 }

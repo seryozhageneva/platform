@@ -7,8 +7,10 @@
     uv run python -m experiments.moodle_check
 
 Скрипт запускает MCP-сервер Moodle дочерней программой — так же, как это делает платформа, —
-спрашивает у него список инструментов и сданные работы задания и печатает, что пришло.
-Токен на экран не выводится. Это не тест: база платформы не нужна и не затрагивается.
+спрашивает у него список инструментов, список сдач для опроса (задача 27) и сданные работы
+задания и печатает, что пришло. Оценки скрипт не ставит: это проверяет сквозной тест
+сценария 2 на тестовом Moodle. Токен на экран не выводится. Это не тест: база платформы не
+нужна и не затрагивается.
 """
 
 import asyncio
@@ -25,6 +27,18 @@ async def check() -> None:
     for tool in await client.list_tools():
         mark = "только чтение" if tool.read_only else "МЕНЯЕТ ВНЕШНЮЮ СИСТЕМУ"
         print(f"Инструмент {tool.server}.{tool.name}: {mark}")
+    listed = await client.call_tool(
+        "moodle",
+        "list_submissions",
+        {"course_id": moodle.course_id, "assignment_id": moodle.assignment_id},
+        read_only=True,
+    )
+    print(f"Список для опроса, сдач: {len(listed['submissions'])}")
+    for mark in listed["submissions"]:
+        print(
+            f"  сдача №{mark['submission_id']}, студент Moodle №{mark['user_id']}, "
+            f"время сдачи {mark['submitted_at']}"
+        )
     answer = await client.call_tool(
         "moodle",
         "get_submissions",

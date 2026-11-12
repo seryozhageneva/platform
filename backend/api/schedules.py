@@ -43,7 +43,7 @@ def _details(cron: str | None, settings: ScheduleRow | None) -> ScheduleDetails:
     )
 
 
-async def _pipeline(
+async def teacher_pipeline(
     pipeline_id: UUID, teacher: Teacher, assembly: Assembled
 ) -> tuple[PipelineRow, Pipeline]:
     row = await assembly.pipelines.get(teacher.id, pipeline_id)
@@ -55,7 +55,7 @@ async def _pipeline(
 
 @router.get("/{pipeline_id}/schedule", summary="Настройки расписания пайплайна")
 async def get_schedule(pipeline_id: UUID, teacher: Teacher, assembly: Assembled) -> ScheduleDetails:
-    _, graph = await _pipeline(pipeline_id, teacher, assembly)
+    _, graph = await teacher_pipeline(pipeline_id, teacher, assembly)
     return _details(schedule_expression(graph), await assembly.schedules.get(pipeline_id))
 
 
@@ -63,7 +63,7 @@ async def get_schedule(pipeline_id: UUID, teacher: Teacher, assembly: Assembled)
 async def put_schedule(
     pipeline_id: UUID, request: ScheduleUpdate, teacher: Teacher, assembly: Assembled
 ) -> ScheduleDetails:
-    row, graph = await _pipeline(pipeline_id, teacher, assembly)
+    row, graph = await teacher_pipeline(pipeline_id, teacher, assembly)
     if row.latest_version != request.expected_version:
         raise ApiError(409, "версия пайплайна изменилась, откройте его заново")
     cron = schedule_expression(graph)

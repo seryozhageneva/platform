@@ -5,7 +5,7 @@ import { TeacherSchedule } from "./TeacherSchedule";
 
 vi.mock("./api", async (importOriginal) => ({
   ...await importOriginal<typeof import("./api")>(),
-  api: { schedule: vi.fn(), saveSchedule: vi.fn() },
+  api: { schedule: vi.fn(), saveSchedule: vi.fn(), moodleWatch: vi.fn(), saveMoodleWatch: vi.fn() },
 }));
 
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
@@ -68,4 +68,25 @@ it("отличает сброс текстового параметра от я�
   expect(api.saveSchedule).toHaveBeenLastCalledWith("teacher", "pipeline", {
     enabled: true, expected_version: 2, params: { topic: "" },
   });
+});
+
+it("для события Moodle показывает последнюю проверку и ошибку и сохраняет через свой адрес", async () => {
+  const watch = {
+    enabled: true, params: {}, poll_minutes: 5, last_polled_at: "2026-11-12T10:00:00Z",
+    last_error: "Moodle не принял токен", seen_submissions: 3,
+  };
+  vi.mocked(api.moodleWatch).mockResolvedValue(watch);
+  vi.mocked(api.saveMoodleWatch).mockResolvedValue({ ...watch, enabled: false });
+  render(<TeacherSchedule kind="moodle" accountId="teacher" pipelineId="pipeline" version={4}
+    disabled={false} params={[]} onSessionChange={vi.fn()} />);
+
+  await screen.findByText(/Уже взято работ: 3/);
+  expect(screen.getByText("Ошибка проверки Moodle: Moodle не принял токен")).toBeTruthy();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Включено" }));
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить запуск по событию Moodle" }));
+  await screen.findByText("Настройки запуска по событию Moodle сохранены.");
+  expect(api.saveMoodleWatch).toHaveBeenCalledWith("teacher", "pipeline", {
+    enabled: false, expected_version: 4, params: {},
+  });
+  expect(api.schedule).not.toHaveBeenCalled();
 });

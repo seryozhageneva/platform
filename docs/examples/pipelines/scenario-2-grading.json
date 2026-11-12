@@ -2,7 +2,7 @@
   "format": 1,
   "id": "scenario_2_grading",
   "name": "Проверка работ",
-  "description": "Работы из Moodle проверяются: текст — по рубрике, код — тестами. Преподаватель подтверждает таблицу, оценки уходят в Moodle и на почту.",
+  "description": "Работы из Moodle проверяются: текст — по рубрике, код — тестами. Преподаватель подтверждает таблицу, оценки с комментарием уходят в Moodle; о новой оценке студенту сообщает сам Moodle (ADR 0034).",
   "params": [
     {"name": "course_id", "title": "Курс Moodle", "type": "integer"},
     {"name": "assignment_id", "title": "Задание Moodle", "type": "integer"},
@@ -136,20 +136,8 @@
               "verdict": "each_approved.item.verdict",
               "comment": "each_approved.item.comment"
             }
-          },
-          {
-            "id": "to_email",
-            "type": "block",
-            "block": "sink.email",
-            "title": "Отправить письмо студенту",
-            "config": {"subject": "Результат проверки работы"},
-            "inputs": {
-              "content": "each_approved.item.comment",
-              "recipient": "each_approved.item.work"
-            }
           }
-        ],
-        "transitions": [{"from": "to_moodle", "to": "to_email"}]
+        ]
       }
     }
   ],

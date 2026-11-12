@@ -26,26 +26,34 @@ def _api(moodle: FakeMoodle, *, token: str = TOKEN) -> Callable[[], MoodleApi]:
     return lambda: MoodleApi(SITE, token, client)
 
 
-def _call(make_api: Callable[[], MoodleApi], **arguments: Any):
+def _call(make_api: Callable[[], MoodleApi], tool: str = "get_submissions", **arguments: Any):
     async def go():
         async with Client(build_server(make_api)) as client:
-            return await client.call_tool(
-                "get_submissions", {"course_id": 2, "assignment_id": 1, **arguments}
-            )
+            return await client.call_tool(tool, {"course_id": 2, "assignment_id": 1, **arguments})
 
     return asyncio.run(go())
 
 
-def test_tool_is_marked_read_only():
+def test_reading_tools_are_read_only_and_grading_is_not():
     async def go():
         async with Client(build_server(_api(FakeMoodle()))) as client:
-            return (await client.list_tools()).tools
+            return {tool.name: tool for tool in (await client.list_tools()).tools}
 
     tools = asyncio.run(go())
-    assert [tool.name for tool in tools] == ["get_submissions"]
-    assert tools[0].annotations.read_only_hint is True
-    assert tools[0].annotations.destructive_hint is False
-    assert set(tools[0].input_schema["required"]) == {"course_id", "assignment_id"}
+    assert list(tools) == ["get_submissions", "list_submissions", "save_grade"]
+    for name in ("get_submissions", "list_submissions"):
+        assert tools[name].annotations.read_only_hint is True
+        assert tools[name].annotations.destructive_hint is False
+        assert set(tools[name].input_schema["required"]) == {"course_id", "assignment_id"}
+    grade = tools["save_grade"]
+    assert grade.annotations.read_only_hint is False
+    assert set(grade.input_schema["required"]) == {
+        "course_id",
+        "assignment_id",
+        "user_id",
+        "score",
+        "max_score",
+    }
 
 
 def test_only_submitted_works_with_content_and_no_names():
@@ -69,6 +77,7 @@ def test_only_submitted_works_with_content_and_no_names():
     assert works[0]["meta"] == {
         "moodle_user_id": 4,
         "moodle_submission_id": 1,
+        "moodle_course_id": 2,
         "moodle_assignment_id": 1,
         "submitted_at": 1794393677,
     }
@@ -152,3 +161,61 @@ def test_server_without_settings_reports_error():
     result = asyncio.run(go())
     assert result.is_error is True
     assert "адрес Moodle" in result.content[0].text
+
+
+def test_only_chosen_submissions_are_downloaded():
+    moodle = FakeMoodle()
+    result = _call(_api(moodle), submission_ids=[3])
+    works = result.structured_content["works"]
+    assert [work["name"] for work in works] == ["solution.py"]
+    downloads = [r for r in moodle.requests if "pluginfile" in r.url.path]
+    assert len(downloads) == 1
+
+
+def test_list_of_submissions_has_no_files_and_no_drafts():
+    moodle = FakeMoodle()
+    result = _call(_api(moodle), "list_submissions")
+    assert result.structured_content == {
+        "submissions": [
+            {"submission_id": 1, "user_id": 4, "submitted_at": 1794393677},
+            {"submission_id": 2, "user_id": 5, "submitted_at": 1794393677},
+            {"submission_id": 3, "user_id": 6, "submitted_at": 1794393677},
+        ],
+        "outcome": "ok",
+    }
+    assert not [r for r in moodle.requests if "pluginfile" in r.url.path]
+
+
+def test_grade_is_scaled_to_assignment_and_comment_is_plain_text():
+    moodle = FakeMoodle(max_grade=10)
+    result = _call(
+        _api(moodle),
+        "save_grade",
+        user_id=4,
+        score=1,
+        max_score=2,
+        comment="Допишите <b>вывод</b>.",
+    )
+    assert result.structured_content == {"grade": 5.0, "outcome": "saved"}
+    sent = moodle.grades[4]
+    assert sent["assignmentid"] == "1"
+    assert sent["grade"] == "5.0"
+    assert sent["attemptnumber"] == "-1"
+    assert sent["plugindata[assignfeedbackcomments_editor][text]"] == "Допишите <b>вывод</b>."
+    assert sent["plugindata[assignfeedbackcomments_editor][format]"] == "2"
+
+
+@pytest.mark.parametrize(
+    ("score", "max_score", "max_grade", "match"),
+    [
+        (3, 2, 100, "от 0 до максимума"),
+        (1, 0, 100, "от 0 до максимума"),
+        (1, 2, -1, "не баллами"),
+    ],
+)
+def test_bad_grade_is_refused_and_moodle_is_not_changed(score, max_score, max_grade, match):
+    moodle = FakeMoodle(max_grade=max_grade)
+    result = _call(_api(moodle), "save_grade", user_id=4, score=score, max_score=max_score)
+    assert result.is_error is True
+    assert match in result.content[0].text
+    assert moodle.grades == {}

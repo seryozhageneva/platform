@@ -18,6 +18,8 @@ export type CabinetResult = components["schemas"]["CabinetResultOut"];
 export type StudentResult = components["schemas"]["StudentResultOut"];
 export type ScheduleDetails = components["schemas"]["ScheduleDetails"];
 export type ScheduleUpdate = components["schemas"]["ScheduleUpdate"];
+export type MoodleWatchDetails = components["schemas"]["MoodleWatchDetails"];
+export type MoodleWatchUpdate = components["schemas"]["MoodleWatchUpdate"];
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly problems: Problem[] = []) {
@@ -84,6 +86,16 @@ export const api = {
   },
   async saveSchedule(accountId: string, pipeline_id: string, body: ScheduleUpdate) {
     return checked(await client.PUT("/api/v1/pipelines/{pipeline_id}/schedule", {
+      params: { header: account(accountId), path: { pipeline_id } }, body,
+    }));
+  },
+  async moodleWatch(accountId: string, pipeline_id: string) {
+    return checked(await client.GET("/api/v1/pipelines/{pipeline_id}/moodle-watch", {
+      params: { header: account(accountId), path: { pipeline_id } },
+    }));
+  },
+  async saveMoodleWatch(accountId: string, pipeline_id: string, body: MoodleWatchUpdate) {
+    return checked(await client.PUT("/api/v1/pipelines/{pipeline_id}/moodle-watch", {
       params: { header: account(accountId), path: { pipeline_id } }, body,
     }));
   },

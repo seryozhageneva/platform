@@ -1,17 +1,18 @@
-"""Гейт 2, сценарий 2: работы из Moodle проверены, преподаватель подтвердил таблицу.
+"""Гейт 2, сценарий 2: сдача работы в Moodle запускает проверку, оценка появляется в Moodle.
 
-Путь: работы приходят из подделки Moodle через MCP-сервер → документ превращается в текст
-и проверяется по рубрике, код — тестами в песочнице → модель пишет комментарий →
-преподаватель через API правит комментарий, одну работу пропускает, остальное подтверждает.
+Путь: преподаватель включает запуск по событию Moodle → опрос Moodle находит новые сдачи и
+создаёт один запуск → работы приходят через MCP-сервер → документ превращается в текст и
+проверяется по рубрике, код — тестами в песочнице → модель пишет комментарий →
+преподаватель через API правит комментарий, одну работу пропускает, остальное подтверждает →
+оценка и комментарий уходят в Moodle (задача 27, ADR 0034).
 
-Пайплайн — пример `scenario-2-grading.json` с двумя отличиями. Запуск вручную, потому что
-запуск по событию Moodle и по расписанию появится в задачах 25 и 27. Последний цикл
-«оценка в Moodle и письмо студенту» отрезан: его блоки — задачи 26 и 27. Модель фейковая,
-песочница работает в том же процессе, а контейнер с программой заменён подделкой.
+Пайплайн — пример `scenario-2-grading.json` без изменений. Модель фейковая, песочница
+работает в том же процессе, а контейнер с программой заменён подделкой.
 """
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -31,6 +32,7 @@ from backend.models.tables import ConnectionKind
 from backend.triggers.assembly import Assembly
 from backend.triggers.http_blocks import http_connector
 from backend.triggers.mcp_blocks import connection_tools, mcp_connector
+from backend.triggers.moodle_event import poll_moodle
 from backend.triggers.worker import run_manual
 from experiments.moodle_setup import seed_test_moodle, work_files
 from mcp_servers.moodle.moodle_api import MoodleApi
@@ -42,7 +44,7 @@ from services.sandbox.runner import Execution
 API = "/api/v1"
 TEST_MOODLE = "http://localhost:8080"
 SCENARIO = Path(__file__).resolve().parents[2] / "docs/examples/pipelines/scenario-2-grading.json"
-CUT = {"each_approved"}
+NOON = datetime(2026, 11, 12, 12, tzinfo=UTC)
 GRADES = [
     {"score": 2, "max_score": 2, "comment": "Оба критерия выполнены."},
     {"score": 1, "max_score": 2, "comment": "Нет вывода формулы."},
@@ -55,16 +57,7 @@ COMMENTS = [
 
 
 def _pipeline() -> dict:
-    pipeline = json.loads(SCENARIO.read_text(encoding="utf-8"))
-    start = next(node for node in pipeline["nodes"] if node["type"] == "trigger")
-    start["launches"] = [{"type": "manual"}]
-    pipeline["nodes"] = [node for node in pipeline["nodes"] if node["id"] not in CUT]
-    pipeline["transitions"] = [
-        move
-        for move in pipeline["transitions"]
-        if move["from"] not in CUT and move["to"] not in CUT
-    ]
-    return pipeline
+    return json.loads(SCENARIO.read_text(encoding="utf-8"))
 
 
 def _fake_tools(moodle: FakeMoodle, connections: ConnectionRepository):
@@ -101,13 +94,14 @@ def _grade_and_approve(
     monkeypatch.setattr(sandbox, "execute", execute)
     sandbox_http = httpx.AsyncClient(transport=httpx.ASGITransport(app=sandbox.create_app()))
     connections = ConnectionRepository(sessions, SecretBox(Fernet.generate_key().decode()))
+    moodle_tools = tools_for(connections)
     registry = load_registry(
         BUILTIN_BLOCKS,
-        {"mcp": mcp_connector(tools_for(connections)), "http": http_connector(sandbox_http)},
+        {"mcp": mcp_connector(moodle_tools), "http": http_connector(sandbox_http)},
     )
     assert registry.problems == []
     llm = FakeLLM([GRADES[0], COMMENTS[0], GRADES[1], COMMENTS[1], COMMENTS[2]])
-    assembly = Assembly(sessions, registry, llm, connections=connections)
+    assembly = Assembly(sessions, registry, llm, connections=connections, moodle_tools=moodle_tools)
     jobs: list[UUID] = []
 
     async def enqueue(run_id: UUID) -> None:
@@ -137,14 +131,23 @@ def _grade_and_approve(
         status=201,
     )
     pipeline = _post(client, "/pipelines", _pipeline(), status=201)
-    launched = _post(
-        client,
-        f"/pipelines/{pipeline['id']}/runs",
-        {"params": {"course_id": course_id, "assignment_id": assignment_id, "task_id": task["id"]}},
-        status=201,
+    params = {"course_id": course_id, "assignment_id": assignment_id, "task_id": task["id"]}
+    watch_path = f"{API}/pipelines/{pipeline['id']}/moodle-watch"
+    watch = client.put(
+        watch_path,
+        json={"enabled": True, "params": params, "expected_version": pipeline["version"]},
     )
-    asyncio.run(run_manual(assembly, jobs[0]))
+    assert watch.status_code == 200, watch.text
+    assert watch.json()["poll_minutes"] == 5
+
+    # Рабочий процесс опрашивает Moodle: три сданные работы — один запуск на все.
+    asyncio.run(poll_moodle(assembly, enqueue, now=NOON))
+    [run_id] = jobs
+    watched = client.get(watch_path).json()
+    assert (watched["seen_submissions"], watched["last_error"]) == (3, None)
+    asyncio.run(run_manual(assembly, run_id))
     asyncio.run(sandbox_http.aclose())
+    launched = {"id": str(run_id)}
 
     run = client.get(f"{API}/runs/{launched['id']}").json()
     assert run["status"] == "waiting", run
@@ -188,7 +191,26 @@ def _grade_and_approve(
     approved = state.ports["review"]["approved"]
     assert [row["work"]["name"] for row in approved] == ["work1.pdf", "solution.py"]
     assert approved[1]["comment"] == {"text": "Отлично, все тесты пройдены."}
+    # Оценка поставлена за каждую подтверждённую работу; пропущенная работа в Moodle не ушла.
+    saved = [
+        event
+        for event in run_events(client, launched["id"])
+        if event["type"] == "moodle_grade_saved"
+    ]
+    assert [event["data"]["moodle_user_id"] for event in saved] == [
+        row["work"]["meta"]["moodle_user_id"] for row in approved
+    ]
+
+    # Следующий опрос: новых сдач нет — второго запуска нет.
+    asyncio.run(poll_moodle(assembly, enqueue, now=NOON + timedelta(minutes=5)))
+    assert jobs == [run_id]
     return approved
+
+
+def run_events(client, run_id: str) -> list[dict]:
+    response = client.get(f"{API}/runs/{run_id}/events")
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_works_from_fake_moodle_are_graded_and_approved(sessions, teacher, monkeypatch):
@@ -206,8 +228,16 @@ def test_works_from_fake_moodle_are_graded_and_approved(sessions, teacher, monke
         course_id=2,
         assignment_id=1,
     )
-    # Чья работа — номер студента в Moodle: по нему потом выставляется оценка.
+    # Чья работа — номер студента в Moodle: по нему выставлена оценка.
     assert [row["work"]["meta"]["moodle_user_id"] for row in approved] == [4, 6]
+    assert set(moodle.grades) == {4, 6}
+    comment = "plugindata[assignfeedbackcomments_editor][text]"
+    # Работа 1: 2 из 2 по рубрике; программа: все тесты пройдены — полный балл задания.
+    assert (moodle.grades[4]["grade"], moodle.grades[4][comment]) == ("100.0", "Хорошая работа.")
+    assert (moodle.grades[6]["grade"], moodle.grades[6][comment]) == (
+        "100.0",
+        "Отлично, все тесты пройдены.",
+    )
 
 
 def _test_moodle_is_running() -> bool:
@@ -217,10 +247,24 @@ def _test_moodle_is_running() -> bool:
         return False
 
 
+async def _feedback(moodle, user_id: int) -> tuple[float, str]:
+    """Оценка и комментарий студента так, как их хранит Moodle."""
+    async with httpx.AsyncClient(trust_env=False) as http:
+        api = MoodleApi(moodle.url, moodle.token, http)
+        status = await api.call(
+            "mod_assign_get_submission_status",
+            {"assignid": moodle.assignment_id, "userid": user_id},
+        )
+    feedback = status["feedback"]
+    [comments] = [plugin for plugin in feedback["plugins"] if plugin["type"] == "comments"]
+    [field] = comments["editorfields"]
+    return float(feedback["grade"]["grade"]), field["text"]
+
+
 @pytest.mark.skipif(not _test_moodle_is_running(), reason="тестовый Moodle не запущен")
 def test_works_from_test_moodle_are_graded_and_approved(sessions, teacher, monkeypatch):
     moodle = seed_test_moodle()
-    _grade_and_approve(
+    approved = _grade_and_approve(
         sessions,
         teacher,
         monkeypatch,
@@ -230,3 +274,6 @@ def test_works_from_test_moodle_are_graded_and_approved(sessions, teacher, monke
         course_id=moodle.course_id,
         assignment_id=moodle.assignment_id,
     )
+    first, program = (row["work"]["meta"]["moodle_user_id"] for row in approved)
+    assert asyncio.run(_feedback(moodle, first)) == (100.0, "Хорошая работа.")
+    assert asyncio.run(_feedback(moodle, program)) == (100.0, "Отлично, все тесты пройдены.")
