@@ -5,11 +5,31 @@ import { PipelineEditor, TeacherPipelines } from "./PipelineEditor";
 import { newPipeline } from "./pipelineGraph";
 
 vi.mock("./PipelineCanvas", () => ({
-  PipelineCanvas: ({ issues }: { issues: { message: string }[] }) =>
-    <div>{issues.map((issue) => <p key={issue.message}>{issue.message}</p>)}</div>,
+  PipelineCanvas: ({ issues, select }: { issues: { message: string }[]; select: (id: string) => void }) =>
+    <div>
+      <button type="button" onClick={() => select("start")}>Старт</button>
+      {issues.map((issue) => <p key={issue.message}>{issue.message}</p>)}
+    </div>,
 }));
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+it("сохраняет время в графе и открывает панель расписания для сохранённой версии", async () => {
+  const save = vi.spyOn(api, "savePipeline").mockResolvedValue({ id: "saved", version: 1, warnings: [] });
+  const settings = vi.spyOn(api, "schedule")
+    .mockResolvedValue({ enabled: false, cron: "0 18 * * 5", params: {} });
+  render(<PipelineEditor initial={{ ...newPipeline(), name: "Сводка" }} catalog={[]} accountId="teacher"
+    onSaved={vi.fn()} close={vi.fn()} onSessionChange={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Старт" }));
+  fireEvent.change(screen.getByLabelText("Расписание (cron, время Москвы)"), { target: { value: "0 18 * * 5" } });
+  expect(settings).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  await screen.findByRole("checkbox", { name: "Включено" });
+  expect(save.mock.calls[0]?.[1].nodes[0]).toMatchObject({
+    launches: [{ type: "student" }, { type: "schedule", cron: "0 18 * * 5" }],
+  });
+  expect(settings).toHaveBeenCalledWith("teacher", "saved");
+});
 
 it("сохраняет, показывает предупреждение, оставляет правки после отказа и повторяет сохранение той же версии графа", async () => {
   const warning = { node: "start", code: "warning", message: "Предупреждение от сервера" };

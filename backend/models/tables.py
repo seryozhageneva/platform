@@ -222,6 +222,19 @@ class PipelineVersionRow(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
+class ScheduleRow(Base):
+    """Настройки запуска и последняя поставленная в очередь минута."""
+
+    __tablename__ = "schedules"
+
+    pipeline_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(server_default=text("false"))
+    params: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default=EMPTY_JSON)
+    last_fired_at: Mapped[datetime | None]
+
+
 class AssignmentRow(Base):
     """Назначение: пайплайн с такими значениями параметров — ученику или группе."""
 

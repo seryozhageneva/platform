@@ -128,7 +128,13 @@ docker compose -f docker-compose.prod.yml up -d --build --wait
 
 - Состояние: `docker compose -f docker-compose.prod.yml ps`.
 - Журнал API: `docker compose -f docker-compose.prod.yml logs api --tail 100`.
+- Журнал очереди и расписаний: `docker compose -f docker-compose.prod.yml logs worker --tail 100`.
 - Остановка: `docker compose -f docker-compose.prod.yml down` (данные сохраняются).
+
+Сервис `worker` каждую минуту проверяет включённые расписания (ADR 0032).
+В редакторе у стартового узла можно указать, например, `0 18 * * 5` для запуска
+по пятницам в 18:00 по Москве. После сохранения графа включи запуск в панели
+«Расписание». После перезапуска рабочий процесс проверяет текущую минуту.
 
 ## Чего здесь пока нет
 

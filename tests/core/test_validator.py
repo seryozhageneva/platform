@@ -32,6 +32,21 @@ def test_only_scenario_1_sends_without_approval(scenario, example_manifests):
     assert warnings[2] == warnings[3] == warnings[4] == []
 
 
+@pytest.mark.parametrize("cron", ["", "61 18 * * 5", "0 0 18 * * 5"])
+def test_bad_cron_is_reported_on_the_trigger(cron, scenario, example_manifests):
+    graph = scenario(4)
+    graph["nodes"][0]["launches"][0]["cron"] = cron
+    report = validate(parse_pipeline(graph), example_manifests)
+    assert [(problem.node, problem.code) for problem in report.errors] == [("start", "bad_cron")]
+
+
+def test_two_schedules_are_rejected(scenario, example_manifests):
+    graph = scenario(4)
+    graph["nodes"][0]["launches"].append({"type": "schedule", "cron": "0 19 * * 5"})
+    report = validate(parse_pipeline(graph), example_manifests)
+    assert [problem.code for problem in report.errors] == ["duplicate_schedule"]
+
+
 def find(nodes: list, node_id: str) -> dict:
     for item in nodes:
         if item["id"] == node_id:

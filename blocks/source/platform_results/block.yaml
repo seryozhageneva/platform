@@ -1,0 +1,42 @@
+id: source.platform_results
+version: 0.1.0
+name: "Источник: результаты учеников"
+description: Читает результаты всех учеников преподавателя за указанный период.
+author: platform
+category: source
+inputs:
+  - {name: event, title: Время запуска, type: Event, required: false}
+outputs:
+  - name: results
+    title: Результаты учеников
+    type: Data
+    of: student_result
+    list: true
+    schema:
+      type: object
+      required: [student_id, name, works, hints]
+      properties:
+        student_id: {type: string}
+        name: {type: string}
+        hints: {type: integer, minimum: 0}
+        works:
+          type: array
+          items:
+            type: object
+            required: [source, submitted_at, status]
+            properties:
+              task_id: {type: [string, "null"]}
+              topic: {type: [string, "null"]}
+              source: {enum: [platform, moodle]}
+              submitted_at: {type: string}
+              status: {enum: [unchecked, preliminary, confirmed]}
+              correct: {type: [boolean, "null"]}
+              score: {type: [number, "null"]}
+              max_score: {type: [number, "null"]}
+config:
+  type: object
+  additionalProperties: false
+  properties:
+    period_days: {title: За сколько дней, type: integer, minimum: 1, maximum: 3650, default: 7}
+outcomes: [ok, empty]
+runtime: {type: python, entrypoint: "blocks.source.platform_results:run"}

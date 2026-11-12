@@ -27,6 +27,7 @@ dependencies = [
     "fpdf2>=2.8",
     "mcp>=2.3,<3",
     "cryptography>=44",
+    "cronsim>=2.7,<3",
 ]
 
 [tool.uv]

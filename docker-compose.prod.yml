@@ -82,7 +82,7 @@ services:
       timeout: 3s
       retries: 20
 
-  # Рабочий процесс очереди: выполняет ручные запуски (ADR 0022).
+  # Рабочий процесс очереди: проверяет расписания и выполняет запуски (ADR 0022, 0032).
   worker:
     <<: *platform
     command: ["arq", "backend.triggers.worker.WorkerSettings"]

@@ -8,11 +8,12 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from backend.core.contracts.pipeline import Pipeline
+from backend.core.contracts.ports import TriggerType
 from backend.models.db import Sessions
-from backend.models.tables import PipelineRow, PipelineVersionRow
+from backend.models.tables import PipelineRow, PipelineVersionRow, ScheduleRow
 
 
 class PipelineRepository:
@@ -49,6 +50,14 @@ class PipelineRepository:
                     pipeline_id=row.id, version=row.latest_version, graph=_dump(pipeline)
                 )
             )
+            if all(
+                launch.type is not TriggerType.SCHEDULE for launch in pipeline.trigger().launches
+            ):
+                await session.execute(
+                    update(ScheduleRow)
+                    .where(ScheduleRow.pipeline_id == row.id, ScheduleRow.enabled)
+                    .values(enabled=False)
+                )
             return row.latest_version
 
     async def get(self, owner_id: uuid.UUID, pipeline_id: uuid.UUID) -> PipelineRow | None:
