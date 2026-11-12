@@ -25,7 +25,9 @@ from backend.core.contracts.pipeline import (
     SwitchNode,
     Transition,
 )
+from backend.core.contracts.ports import TriggerType
 from backend.core.contracts.wiring import Problem, check_wiring
+from backend.core.cron import valid_cron
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,7 @@ class _Validator:
 
     def run(self) -> Report:
         self.errors += check_wiring(self.pipeline, self.manifests)
+        self._check_schedule()
         for level in self.levels.values():
             self._check_reachable(level)
             self._check_loops(level)
@@ -176,6 +179,19 @@ class _Validator:
             elif isinstance(node, BlockNode) and node.block in self.manifests:
                 self._check_block(node, self.manifests[node.block])
         return Report(self.errors, self.warnings)
+
+    def _check_schedule(self) -> None:
+        trigger = self.pipeline.trigger()
+        schedules = [launch for launch in trigger.launches if launch.type is TriggerType.SCHEDULE]
+        if len(schedules) > 1:
+            self._error(trigger.id, "duplicate_schedule", "у пайплайна может быть одно расписание")
+        for schedule in schedules:
+            if not valid_cron(schedule.cron or ""):
+                self._error(
+                    trigger.id,
+                    "bad_cron",
+                    "нужно расписание cron из пяти полей, например 0 18 * * 5",
+                )
 
     def _error(self, node: str, code: str, message: str) -> None:
         self.errors.append(Problem(node, code, message))

@@ -22,6 +22,7 @@ from backend.api import (
     pipelines,
     results,
     runs,
+    schedules,
     students,
     tasks,
 )
@@ -71,6 +72,7 @@ def create_app(
     api.include_router(pipelines.router)
     api.include_router(results.router)
     api.include_router(runs.router)
+    api.include_router(schedules.router)
     api.include_router(tasks.router)
 
     @api.get("/health", tags=["Служебное"], summary="Сервер работает")

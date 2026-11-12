@@ -2,9 +2,8 @@
   "format": 1,
   "id": "scenario_4_analytics",
   "name": "Аналитика и рассылки",
-  "description": "Раз в неделю собираются результаты группы, преподаватель получает сводку, ученики — персональные рекомендации после подтверждения.",
+  "description": "Раз в неделю собираются результаты учеников, преподаватель получает сводку, ученики — персональные рекомендации после подтверждения.",
   "params": [
-    {"name": "group_id", "title": "Группа", "type": "string"},
     {"name": "course_id", "title": "Курс Moodle", "type": "integer"}
   ],
   "nodes": [
@@ -18,8 +17,9 @@
       "id": "get_results",
       "type": "block",
       "block": "source.platform_results",
-      "title": "Результаты группы за неделю",
-      "config": {"group_id": {"$param": "group_id"}, "period_days": 7}
+      "title": "Результаты учеников за неделю",
+      "config": {"period_days": 7},
+      "inputs": {"event": "start.event"}
     },
     {
       "id": "get_grades",

@@ -16,6 +16,8 @@ export type Problem = components["schemas"]["ProblemOut"];
 export type RunSummary = components["schemas"]["RunSummary"];
 export type CabinetResult = components["schemas"]["CabinetResultOut"];
 export type StudentResult = components["schemas"]["StudentResultOut"];
+export type ScheduleDetails = components["schemas"]["ScheduleDetails"];
+export type ScheduleUpdate = components["schemas"]["ScheduleUpdate"];
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly problems: Problem[] = []) {
@@ -74,6 +76,16 @@ export const api = {
     return pipeline_id
       ? checked(await client.PUT("/api/v1/pipelines/{pipeline_id}", { params: { header, path: { pipeline_id } }, body }))
       : checked(await client.POST("/api/v1/pipelines", { params: { header }, body }));
+  },
+  async schedule(accountId: string, pipeline_id: string) {
+    return checked(await client.GET("/api/v1/pipelines/{pipeline_id}/schedule", {
+      params: { header: account(accountId), path: { pipeline_id } },
+    }));
+  },
+  async saveSchedule(accountId: string, pipeline_id: string, body: ScheduleUpdate) {
+    return checked(await client.PUT("/api/v1/pipelines/{pipeline_id}/schedule", {
+      params: { header: account(accountId), path: { pipeline_id } }, body,
+    }));
   },
   async me() {
     return checked(await client.GET("/api/v1/auth/me"));

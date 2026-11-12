@@ -7,9 +7,10 @@
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, cast, func, select, update
+from sqlalchemy import and_, cast, func, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB, JSONPATH, Insert, insert
 
 from backend.core.contracts.run import BlockEvent
@@ -20,8 +21,10 @@ from backend.models.submissions import SubmissionGrade
 from backend.models.tables import (
     ApprovalRow,
     EventRow,
+    PipelineRow,
     PipelineVersionRow,
     RunRow,
+    ScheduleRow,
     SubmissionRow,
     UserRow,
 )
@@ -37,6 +40,10 @@ _COLUMNS = {
     "teacher_id",
     "error",
 }
+
+
+class ScheduleChanged(Exception):
+    """Расписание уже сработало, изменилось или выключено."""
 
 
 class PgRunStore:
@@ -214,10 +221,42 @@ class PgRunStore:
         return query, changing
 
     @asynccontextmanager
-    async def queue_launch(self, state: RunState, trigger_id: str) -> AsyncIterator[None]:
+    async def queue_launch(
+        self,
+        state: RunState,
+        trigger_id: str,
+        *,
+        schedule_minute: datetime | None = None,
+        schedule_params: dict[str, Any] | None = None,
+    ) -> AsyncIterator[None]:
         """Откатывает запуск, если постановка задания в очередь не удалась."""
         run_id = uuid.UUID(state.run_id)
         async with self._sessions.begin() as session:
+            if schedule_minute is not None:
+                pipeline_id = uuid.UUID(state.pipeline_id)
+                version = await session.scalar(
+                    select(PipelineRow.latest_version)
+                    .where(PipelineRow.id == pipeline_id)
+                    .with_for_update()
+                )
+                if version != state.pipeline_version:
+                    raise ScheduleChanged
+                claimed = await session.scalar(
+                    update(ScheduleRow)
+                    .where(
+                        ScheduleRow.pipeline_id == pipeline_id,
+                        ScheduleRow.enabled,
+                        ScheduleRow.params == schedule_params,
+                        or_(
+                            ScheduleRow.last_fired_at.is_(None),
+                            ScheduleRow.last_fired_at < schedule_minute,
+                        ),
+                    )
+                    .values(last_fired_at=schedule_minute)
+                    .returning(ScheduleRow.pipeline_id)
+                )
+                if claimed is None:
+                    raise ScheduleChanged
             await session.execute(select(func.pg_advisory_xact_lock(advisory_key(run_id))))
             await session.execute(self._insert_state(state)[0])
             session.add(EventRow(run_id=run_id, node_id=trigger_id, type="run_queued"))

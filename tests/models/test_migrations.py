@@ -26,6 +26,7 @@ TABLES = {
     "files",
     "cabinet_results",
     "connections",
+    "schedules",
 }
 
 

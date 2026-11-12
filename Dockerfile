@@ -29,7 +29,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 # Сначала только библиотеки: этот слой пересобирается, лишь когда меняется uv.lock.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-install-project \
+    && python -c "from zoneinfo import ZoneInfo; ZoneInfo('Europe/Moscow')"
 COPY alembic.ini ./
 COPY backend backend
 COPY blocks blocks

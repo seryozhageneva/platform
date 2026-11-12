@@ -3,6 +3,7 @@ import { api, ApiError, errorMessage } from "./api";
 import type { BlockCatalogItem, Pipeline, PipelineSummary, Problem } from "./api";
 import { PipelineCanvas } from "./PipelineCanvas";
 import { BlockSettings, PipelineParameters } from "./PipelineSettings";
+import { TeacherSchedule } from "./TeacherSchedule";
 import { makeBlock, newPipeline, readOnlyReason, removeNode, sameGraph, updateNode } from "./pipelineGraph";
 
 type Session = { accountId: string; onSessionChange: () => void };
@@ -101,6 +102,8 @@ export function PipelineEditor({ initial, catalog, id, version, accountId, onSes
   const readOnly = readOnlyReason(graph, byId);
   const node = graph.nodes.find((item) => item.id === selected);
   const manifest = node?.type === "block" ? byId.get(node.block) : undefined;
+  const savedTrigger = savedGraph.nodes.find((item) => item.type === "trigger");
+  const savedSchedule = savedTrigger?.launches.find((launch) => launch.type === "schedule");
 
   function change(next: Pipeline) {
     setGraph(next);
@@ -176,6 +179,9 @@ export function PipelineEditor({ initial, catalog, id, version, accountId, onSes
           <li key={index}>{issue.message}</li>)}</ul>}
     </div>}
     {readOnly && <p role="status">{readOnly}</p>}
+    {saved && savedSchedule && <TeacherSchedule key={`${saved.id}:${saved.version}`}
+      accountId={accountId} pipelineId={saved.id} version={saved.version} params={savedGraph.params}
+      disabled={pending || !sameGraph(graph, savedGraph)} onSessionChange={onSessionChange} />}
     <fieldset className="pipeline-editor" disabled={pending || Boolean(readOnly)}>
       <label>Название пайплайна<input value={graph.name}
         onChange={(event) => change({ ...graph, name: event.target.value })} /></label>
@@ -206,7 +212,23 @@ export function PipelineEditor({ initial, catalog, id, version, accountId, onSes
             <BlockSettings graph={graph} node={node} manifest={manifest} change={(next) => change(updateNode(graph, next))} />
             <button type="button" onClick={() => { change(removeNode(graph, node.id)); setSelected(null); }}>Убрать блок</button>
           </> : node?.type === "trigger"
-            ? <p>Запуск: {node.launches.map((launch) => launch.type === "student" ? "ученик открыл урок" : launch.type).join(", ")}.</p>
+            ? <>
+              <p>Запуск: {node.launches.map((launch) => launch.type === "student" ? "ученик открыл урок"
+                : launch.type === "schedule" ? "по расписанию" : launch.type).join(", ")}.</p>
+              <label>Расписание (cron, время Москвы)
+                <input placeholder="0 18 * * 5"
+                  value={node.launches.find((launch) => launch.type === "schedule")?.cron ?? ""}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    const other = node.launches.filter((launch) => launch.type !== "schedule");
+                    const launches = value || other.length === 0
+                      ? [...other, { type: "schedule" as const, cron: value, settings: {} }]
+                      : other;
+                    change(updateNode(graph, { ...node, launches }));
+                  }} />
+              </label>
+              <p>Например, 0 18 * * 5 — по пятницам в 18:00.</p>
+            </>
             : <p>Выберите блок на схеме.</p>}
         </aside>
       </div>

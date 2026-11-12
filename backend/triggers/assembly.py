@@ -33,6 +33,7 @@ from backend.models.llm_calls import LLMCallRepository
 from backend.models.pipelines import PipelineRepository
 from backend.models.platform_store import PgPlatformStore
 from backend.models.run_store import PgRunStore
+from backend.models.schedules import ScheduleRepository
 from backend.models.submissions import SubmissionGrade, SubmissionRepository
 from backend.models.tasks import TaskRepository
 from backend.models.users import UserRepository
@@ -62,6 +63,7 @@ class Assembly:
         self.users = UserRepository(sessions)
         self.auth = AuthRepository(sessions)
         self.pipelines = PipelineRepository(sessions)
+        self.schedules = ScheduleRepository(sessions)
         self.tasks = TaskRepository(sessions)
         self.files = FileRepository(sessions)
         self.results = CabinetResultRepository(sessions)

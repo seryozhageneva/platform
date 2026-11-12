@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "id": "scenario_4_weekly_digest",
+  "name": "Сводка за неделю",
+  "description": "Собирает результаты учеников преподавателя и сохраняет сводку в его кабинете.",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "title": "По пятницам в 18:00",
+      "launches": [{"type": "schedule", "cron": "0 18 * * 5"}]
+    },
+    {
+      "id": "get_results",
+      "type": "block",
+      "block": "source.platform_results",
+      "title": "Результаты учеников за неделю",
+      "config": {"period_days": 7},
+      "inputs": {"event": "start.event"}
+    },
+    {
+      "id": "digest",
+      "type": "block",
+      "block": "ai_process.generate",
+      "title": "Сводка для преподавателя",
+      "config": {
+        "prompt": "Составь короткую недельную сводку. Укажи, у кого нет работ или есть трудности, какие темы стоит повторить. Опирайся на вердикты, темы работ и число подсказок. Если данных мало, так и скажи. Верни JSON с полем summary.",
+        "result": {"type": "Data", "of": "digest"}
+      },
+      "inputs": {"data": "get_results.results"}
+    },
+    {
+      "id": "to_teacher",
+      "type": "block",
+      "block": "sink.cabinet",
+      "title": "Сводка в кабинет преподавателя",
+      "config": {"to": "teacher", "title": "Сводка за неделю"},
+      "inputs": {"content": "digest.result"}
+    }
+  ],
+  "transitions": [
+    {"from": "start", "to": "get_results"},
+    {"from": "get_results", "to": "digest"},
+    {"from": "digest", "to": "to_teacher"}
+  ]
+}
