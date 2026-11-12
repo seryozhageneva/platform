@@ -53,9 +53,10 @@ class GroupSource(StrEnum):
 
 
 class ConnectionKind(StrEnum):
-    """К какой внешней системе подключение; остальные виды добавят задачи 26 и 29."""
+    """К какой внешней системе подключается преподаватель."""
 
     MOODLE = "moodle"
+    TELEGRAM = "telegram"
 
 
 class TaskStatus(StrEnum):
@@ -123,6 +124,7 @@ class UserRow(Base):
     role: Mapped[str] = mapped_column(String(20))
     name: Mapped[str]
     email: Mapped[str | None] = mapped_column(unique=True)
+    notification_email: Mapped[str | None]
     password_hash: Mapped[str | None]
     link_token_hash: Mapped[str | None] = mapped_column(unique=True)
     link_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

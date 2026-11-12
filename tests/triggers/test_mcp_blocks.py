@@ -7,6 +7,8 @@
 import asyncio
 import base64
 from typing import Any
+from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from mcp.server.mcpserver import MCPServer
@@ -17,7 +19,8 @@ from backend.core.contracts.ports import FileRef
 from backend.core.contracts.run import Done, RunContext
 from backend.core.contracts.testing import FakeStore
 from backend.core.registry import BUILTIN_BLOCKS, load_registry
-from backend.mcp_client.client import McpToolClient, ToolCallError, builtin_server
+from backend.mcp_client.client import McpToolClient, ToolCallError, builtin_server, email_server
+from backend.models.users import UserRepository
 from backend.triggers.mcp_blocks import mcp_connector
 from mcp_servers.moodle.testing import FILES, TOKEN, FakeMoodle, fake_server, make_submission
 
@@ -106,6 +109,42 @@ def test_builtin_server_gets_credentials_only_through_its_environment():
     assert params.env == {"MOODLE_URL": "http://moodle.test", "MOODLE_TOKEN": TOKEN}
     with pytest.raises(ToolCallError, match="неизвестный MCP-сервер"):
         builtin_server("gmail", url="x", token="y")
+
+
+def test_notification_servers_start_and_agent_cannot_call_them():
+    telegram = builtin_server("telegram", url="https://api.telegram.org", token="123:fake-test_bot")
+    assert telegram.env == {"TELEGRAM_TOKEN": "123:fake-test_bot"}
+    client = McpToolClient(
+        {
+            "email": email_server({}),
+            "telegram": telegram,
+        }
+    )
+    tools = asyncio.run(client.list_tools())
+    assert [(tool.server, tool.name, tool.read_only) for tool in tools] == [
+        ("email", "send_email", False),
+        ("telegram", "send_message", False),
+    ]
+    for tool in tools:
+        with pytest.raises(ToolCallError, match="меняет внешнюю систему"):
+            asyncio.run(client.call(tool.server, tool.name, {}))
+
+
+def test_notification_does_not_call_adapter_for_student_of_another_teacher():
+    users = AsyncMock(spec=UserRepository)
+    users.get_student.return_value = None
+    tools_for = AsyncMock()
+    registry = load_registry(BUILTIN_BLOCKS, {"mcp": mcp_connector(tools_for, users=users)})
+    block = registry.blocks["sink.telegram"]
+    student = UUID(int=99)
+    inputs = {
+        "content": {"text": "Рекомендация"},
+        "recipient": {"student_id": str(student), "telegram_id": 42},
+    }
+    with pytest.raises(RuntimeError, match="не найден у преподавателя запуска"):
+        asyncio.run(block.run(inputs, {}, context(FakeStore())))
+    users.get_student.assert_awaited_once_with(UUID(int=1), student)
+    tools_for.assert_not_awaited()
 
 
 def test_moodle_block_saves_works_and_passes_file_refs():

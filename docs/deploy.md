@@ -136,6 +136,47 @@ docker compose -f docker-compose.prod.yml up -d --build --wait
 по пятницам в 18:00 по Москве. После сохранения графа включи запуск в панели
 «Расписание». После перезапуска рабочий процесс проверяет текущую минуту.
 
+## Уведомления по почте и в Telegram
+
+Отправители работают внутри образа платформы. Для почты укажи в локальном `.env` параметры
+`PLATFORM_SMTP_HOST`, `PLATFORM_SMTP_USERNAME` и `PLATFORM_SMTP_PASSWORD`. Если почтовый сервис
+требует пароль приложения, используй его. Порт по умолчанию — 465 с TLS. Для сервиса с
+STARTTLS укажи `PLATFORM_SMTP_PORT=587`. Адрес отправителя `PLATFORM_SMTP_FROM` можно
+оставить пустым, если почтовый логин совпадает с разрешённым адресом. Для работы MCP-блоков
+также нужен `PLATFORM_SECRET_KEY`. На сервере API и worker получают эти параметры из
+`env_file` в `docker-compose.prod.yml`. Для доставки нужен исходящий доступ к SMTP и
+к `https://api.telegram.org`.
+
+### Ручная проверка на своём компьютере
+
+Используй отдельного демонстрационного преподавателя, выдуманных учеников, свой тестовый
+ящик и личный чат со своим тестовым ботом. В чате сначала нажми «Старт». Номер личного чата
+берётся из `message.chat.id` в ответе метода `getUpdates` тестового бота.
+[Документация Telegram](https://core.telegram.org/bots/api#getupdates)
+
+1. Примени миграции командой `uv run --locked --no-sync alembic upgrade head`. В отдельных
+   терминалах запусти `uv run --locked --no-sync python -m backend.api` и
+   `uv run --locked --no-sync arq backend.triggers.worker.WorkerSettings`.
+   Для этого примера достаточно `LLM_PROVIDER=fake`.
+2. В локальном `http://127.0.0.1:8000/docs` войди через `POST /api/v1/auth/teacher`. Сохрани
+   токен тестового бота через `PUT /api/v1/connections/telegram`, передав только поле
+   `token`. Используй токен только локально.
+3. Создай двух тестовых учеников через `POST /api/v1/students`. Через
+   `PUT /api/v1/students/{student_id}/notification-contacts` укажи одному только
+   `telegram_id`, второму только `email`. Пропущенное поле или `null` очищает контакт.
+4. Загрузи DOCX с коротким тестовым текстом через `POST /api/v1/files`. Сохрани граф
+   [notifications-demo.json](examples/pipelines/notifications-demo.json) через
+   `POST /api/v1/pipelines`. Запусти его через `POST /api/v1/pipelines/{pipeline_id}/runs`
+   с телом `{"params": {"file_id": "<id файла>"}}`.
+5. Через `GET /api/v1/runs/{run_id}` проверь статус `waiting`. Ящик и чат пока пусты.
+   Подтверди обе тестовые строки в кабинете преподавателя. Через API то же действие
+   выполняет `POST /api/v1/runs/{run_id}/responses`: передай `node_id` и `approval_id` из
+   `waiting`, а в `response.rows` — по записи с `index` для каждой строки. Для любой лишней
+   строки укажи `keep: false`.
+6. Проверь статус `done`, письмо в ящике и сообщение в личном чате. Если сервис вернул
+   ошибку или истёк таймаут, сначала проверь оба канала. Платформа показывает сбой в журнале
+   и не повторяет отправку автоматически.
+
 ## Чего здесь пока нет
 
 Резервных копий базы, наблюдения за сервером и автоматического обновления из GitHub. Это

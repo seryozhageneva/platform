@@ -1,12 +1,12 @@
 """Репозиторий людей: преподаватели и их ученики.
 
-Один вызов — одна транзакция. Здесь только создание и поиск пользователей.
+Один вызов — одна транзакция. Здесь создание, поиск и контакты пользователей.
 Вход по паролю и по личной ссылке обслуживает отдельное хранилище сеансов.
 """
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from backend.models.db import Sessions
 from backend.models.tables import Role, UserRow
@@ -45,6 +45,27 @@ class UserRepository:
         async with self._sessions() as session:
             return await session.scalar(select(UserRow).where(UserRow.email == _normalize(email)))
 
+    async def get_student(self, owner_id: uuid.UUID, student_id: uuid.UUID) -> UserRow | None:
+        async with self._sessions() as session:
+            return await session.scalar(select(UserRow).where(*_own_student(owner_id, student_id)))
+
+    async def set_notification_contacts(
+        self,
+        owner_id: uuid.UUID,
+        student_id: uuid.UUID,
+        *,
+        email: str | None,
+        telegram_id: int | None,
+    ) -> UserRow | None:
+        query = (
+            update(UserRow)
+            .where(*_own_student(owner_id, student_id))
+            .values(notification_email=email, telegram_id=telegram_id)
+            .returning(UserRow)
+        )
+        async with self._sessions.begin() as session:
+            return await session.scalar(query)
+
     async def list_students(self, owner_id: uuid.UUID) -> list[UserRow]:
         """Только ученики этого преподавателя."""
         query = (
@@ -58,3 +79,7 @@ class UserRepository:
 
 def _normalize(email: str) -> str:
     return email.strip().lower()
+
+
+def _own_student(owner_id: uuid.UUID, student_id: uuid.UUID):
+    return (UserRow.id == student_id, UserRow.owner_id == owner_id, UserRow.role == Role.STUDENT)

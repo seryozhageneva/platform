@@ -12,6 +12,7 @@ name: platform-prod
 # в описании api (build), остальные берут уже собранный.
 x-platform: &platform
   image: platform:local
+  # Здесь же API и worker получают необязательные PLATFORM_SMTP_* для отправки уведомлений.
   env_file: .env
   environment: &platform-env
     # Адрес базы собирается из пароля: база живёт в соседнем контейнере «postgres».

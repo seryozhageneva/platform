@@ -25,9 +25,12 @@ ROOT = Path(__file__).resolve().parents[2]
 # Сколько ждать ответа инструмента: скачивание работ большого задания — не мгновенно.
 TOOL_TIMEOUT = 180
 
-# Встроенные MCP-серверы платформы: имя в манифесте → модуль, который запускается. Имя
-# сервера совпадает с видом подключения преподавателя, из которого берутся адрес и токен.
-BUILTIN_SERVERS = {"moodle": "mcp_servers.moodle"}
+# Встроенные MCP-серверы платформы: имя в манифесте → модуль, который запускается.
+BUILTIN_SERVERS = {
+    "moodle": "mcp_servers.moodle",
+    "email": "mcp_servers.email",
+    "telegram": "mcp_servers.telegram",
+}
 
 # Что сервер может получить: процесс адресуется так же, как и в тестах — по объекту сервера.
 ServerTarget = Any
@@ -39,14 +42,26 @@ class ToolCallError(RuntimeError):
 
 def builtin_server(name: str, *, url: str, token: str) -> StdioServerParameters:
     """Как запустить встроенный сервер с адресом и токеном подключения."""
+    if name == "telegram":
+        # Telegram ходит на фиксированный адрес Bot API.
+        return _stdio_server(name, env={"TELEGRAM_TOKEN": token})
+    prefix = name.upper()
+    return _stdio_server(name, env={f"{prefix}_URL": url, f"{prefix}_TOKEN": token})
+
+
+def email_server(env: dict[str, str]) -> StdioServerParameters:
+    """Почтовый сервер получает настройки ящика платформы."""
+    return _stdio_server("email", env=env)
+
+
+def _stdio_server(name: str, *, env: dict[str, str]) -> StdioServerParameters:
     module = BUILTIN_SERVERS.get(name)
     if module is None:
         raise ToolCallError(f"неизвестный MCP-сервер «{name}»")
-    prefix = name.upper()
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", module],
-        env={f"{prefix}_URL": url, f"{prefix}_TOKEN": token},
+        env=env,
         cwd=ROOT,
     )
 

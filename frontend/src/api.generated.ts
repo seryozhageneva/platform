@@ -447,6 +447,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/students/{student_id}/notification-contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Заменить контакты для уведомлений
+         * @description Передайте null или опустите поле, чтобы очистить контакт соответствующего канала.
+         */
+        put: operations["save_notification_contacts_api_v1_students__student_id__notification_contacts_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks": {
         parameters: {
             query?: never;
@@ -655,21 +675,21 @@ export interface components {
             /**
              * Token
              * Format: password
-             * @description Токен веб-сервиса; в ответах не возвращается
+             * @description Токен Moodle или бота; не возвращается
              */
             token: string;
             /**
              * Url
-             * @description Адрес сайта, например https://moodle.example.ru
+             * @description Адрес сайта Moodle. Для Telegram можно опустить.
              */
-            url: string;
+            url?: string | null;
         };
         /**
          * ConnectionKind
-         * @description К какой внешней системе подключение; остальные виды добавят задачи 26 и 29.
+         * @description К какой внешней системе подключается преподаватель.
          * @enum {string}
          */
-        ConnectionKind: "moodle";
+        ConnectionKind: "moodle" | "telegram";
         /** ConnectionOut */
         ConnectionOut: {
             /**
@@ -902,6 +922,13 @@ export interface components {
             otherwise?: string | null;
             /** Reset On */
             reset_on?: string | null;
+        };
+        /** NotificationContacts */
+        NotificationContacts: {
+            /** Email */
+            email?: string | null;
+            /** Telegram Id */
+            telegram_id?: number | null;
         };
         /**
          * OutputPort
@@ -3637,6 +3664,79 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Не сказано, кто спрашивает */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Действие недоступно */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Не найдено среди своих записей */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Сеанс сменился */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Запрос не принят: причины — в `problems` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    save_notification_contacts_api_v1_students__student_id__notification_contacts_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Expected-Account"?: string | null;
+            };
+            path: {
+                student_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationContacts"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationContacts"];
+                };
             };
             /** @description Не сказано, кто спрашивает */
             401: {

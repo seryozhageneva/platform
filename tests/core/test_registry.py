@@ -335,9 +335,11 @@ def test_builtin_blocks_load_without_problems():
     """Сторож для всех будущих блоков: каждый блок в `blocks/` обязан загружаться."""
     registry = load_registry(BUILTIN_BLOCKS)
     assert [str(problem) for problem in registry.problems] == []
-    # Без способов вызова HTTP и MCP реестр загружает только манифесты песочницы и Moodle.
+    # Без способов вызова HTTP и MCP сетевые блоки видны в каталоге только как манифесты.
     assert set(registry.manifests) - set(registry.blocks) == {
         "check.code_tests",
+        "sink.email",
+        "sink.telegram",
         "source.moodle_submissions",
     }
     assert "source.task_bank" in registry.blocks

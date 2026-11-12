@@ -1,9 +1,10 @@
-"""Подключения преподавателя к внешним системам (ADR 0028): пока только Moodle.
+"""Подключения преподавателя к Moodle и Telegram (ADR 0028, 0033).
 
 Токен принимается, шифруется и больше никогда не отдаётся: в ответах только вид, адрес и
 время изменения. Чужие подключения не видны. Формы в браузере пока нет — только API.
 """
 
+import re
 from datetime import datetime
 from typing import Annotated
 
@@ -23,15 +24,22 @@ router = APIRouter(
     responses=REFUSALS | {503: {"model": ErrorOut, "description": "Не задан ключ шифрования"}},
 )
 
+TELEGRAM_API = "https://api.telegram.org"
+_BOT_TOKEN = re.compile(r"[0-9]{1,20}:[A-Za-z0-9_-]+")
+
 
 class ConnectionIn(BaseModel):
-    url: Annotated[str, Field(description="Адрес сайта, например https://moodle.example.ru")]
+    url: Annotated[
+        str | None, Field(description="Адрес сайта Moodle. Для Telegram можно опустить.")
+    ] = None
     # SecretStr: токен не попадёт в журнал и в текст ошибок проверки.
-    token: Annotated[SecretStr, Field(description="Токен веб-сервиса; в ответах не возвращается")]
+    token: Annotated[SecretStr, Field(description="Токен Moodle или бота; не возвращается")]
 
     @field_validator("url")
     @classmethod
-    def _site_address(cls, value: str) -> str:
+    def _site_address(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         value = value.strip().rstrip("/")
         try:
             url = httpx.URL(value)
@@ -47,7 +55,7 @@ class ConnectionIn(BaseModel):
     @classmethod
     def _token(cls, value: SecretStr) -> SecretStr:
         secret = value.get_secret_value().strip()
-        if not secret or len(secret) > 256 or not secret.isalnum():
+        if not secret or len(secret) > 256:
             raise ValueError("токен пуст или похож не на токен")
         return SecretStr(secret)
 
@@ -86,9 +94,16 @@ async def list_connections(teacher: Teacher, assembly: Assembled) -> list[Connec
 async def save_connection(
     kind: ConnectionKind, connection: ConnectionIn, teacher: Teacher, assembly: Assembled
 ) -> ConnectionOut:
-    row = await _repository(assembly).save(
-        teacher.id, kind, url=connection.url, token=connection.token.get_secret_value()
-    )
+    url, token = connection.url, connection.token.get_secret_value()
+    if kind is ConnectionKind.TELEGRAM:
+        if url not in (None, TELEGRAM_API):
+            raise ApiError(422, "для Telegram используется только https://api.telegram.org")
+        if not _BOT_TOKEN.fullmatch(token):
+            raise ApiError(422, "токен бота Telegram записан в неверном формате")
+        url = TELEGRAM_API
+    elif url is None or not token.isalnum():
+        raise ApiError(422, "для Moodle нужны адрес сайта и буквенно-цифровой токен")
+    row = await _repository(assembly).save(teacher.id, kind, url=url, token=token)
     return ConnectionOut.of(row)
 
 

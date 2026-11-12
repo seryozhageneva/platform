@@ -42,6 +42,22 @@ def test_other_teacher_does_not_see_or_delete(api, me, stranger):
     assert len(api.get("/api/v1/connections", headers=me).json()) == 1
 
 
+def test_telegram_uses_fixed_address_and_keeps_token_private(api, me, stranger):
+    token = "12345:fake-test_bot"
+    saved = api.put("/api/v1/connections/telegram", json={"token": token}, headers=me)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["url"] == "https://api.telegram.org"
+    assert saved.json()["kind"] == "telegram"
+    listed = api.get("/api/v1/connections", headers=me)
+    assert token not in saved.text + listed.text
+    assert api.get("/api/v1/connections", headers=stranger).json() == []
+
+    for body in ({"token": "bad-token"}, {"url": "https://example.test", "token": token}):
+        answer = api.put("/api/v1/connections/telegram", json=body, headers=me)
+        assert answer.status_code == 422, answer.text
+        assert body["token"] not in answer.text
+
+
 def test_without_login_nothing_is_available(api):
     assert api.get("/api/v1/connections").status_code == 401
     assert api.put("/api/v1/connections/moodle", json=MOODLE).status_code == 401

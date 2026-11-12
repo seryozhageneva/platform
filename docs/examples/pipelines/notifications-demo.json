@@ -1,0 +1,89 @@
+{
+  "format": 1,
+  "id": "notifications_demo",
+  "name": "Тестовая рассылка после подтверждения",
+  "description": "Берёт текст из тестового DOCX. Преподаватель редактирует и подтверждает сообщения для выдуманных учеников.",
+  "params": [{"name": "file_id", "title": "Номер тестового DOCX", "type": "string"}],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger",
+      "launches": [{"type": "manual"}]
+    },
+    {
+      "id": "students",
+      "type": "block",
+      "block": "source.platform_results"
+    },
+    {
+      "id": "document",
+      "type": "block",
+      "block": "source.file",
+      "config": {"file_id": {"$param": "file_id"}}
+    },
+    {
+      "id": "prepare",
+      "type": "for_each",
+      "over": "students.results",
+      "body": {
+        "start": "read_text",
+        "nodes": [{
+          "id": "read_text",
+          "type": "block",
+          "block": "transform.document_to_text",
+          "inputs": {"file": "document.file"}
+        }]
+      },
+      "collect": {"student": "prepare.item", "message": "read_text.text"},
+      "as": "test_notification"
+    },
+    {
+      "id": "review",
+      "type": "block",
+      "block": "approval.review_table",
+      "config": {"editable_fields": "message.text"},
+      "inputs": {"items": "prepare.results"}
+    },
+    {
+      "id": "deliver",
+      "type": "for_each",
+      "over": "review.approved",
+      "body": {
+        "start": "telegram",
+        "nodes": [
+          {
+            "id": "telegram",
+            "type": "block",
+            "block": "sink.telegram",
+            "inputs": {"content": "deliver.item.message", "recipient": "deliver.item.student"}
+          },
+          {
+            "id": "email",
+            "type": "block",
+            "block": "sink.email",
+            "config": {"subject": "Тестовая рекомендация"},
+            "inputs": {"content": "deliver.item.message", "recipient": "deliver.item.student"}
+          },
+          {
+            "id": "cabinet",
+            "type": "block",
+            "block": "sink.cabinet",
+            "config": {"to": "recipient", "title": "Тестовая рекомендация"},
+            "inputs": {"content": "deliver.item.message", "recipient": "deliver.item.student"}
+          }
+        ],
+        "transitions": [
+          {"from": "telegram", "when": "skipped", "to": "email"},
+          {"from": "email", "when": "skipped", "to": "cabinet"}
+        ]
+      }
+    }
+  ],
+  "transitions": [
+    {"from": "start", "to": "students"},
+    {"from": "students", "when": "ok", "to": "document"},
+    {"from": "document", "when": "ok", "to": "prepare"},
+    {"from": "prepare", "when": "ok", "to": "review"},
+    {"from": "review", "when": "approved", "to": "deliver"}
+  ]
+}
