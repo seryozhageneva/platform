@@ -41,3 +41,31 @@ it("сохраняет параметры, показывает ошибку и 
     enabled: false, expected_version: 2, params: { days: 7 },
   });
 });
+
+it("отличает сброс текстового параметра от явной пустой строки", async () => {
+  const schedule = { enabled: true, cron: "0 18 * * 5" };
+  vi.mocked(api.schedule).mockResolvedValue({ ...schedule, params: { topic: "Дроби" } });
+  vi.mocked(api.saveSchedule)
+    .mockResolvedValueOnce({ ...schedule, params: {} })
+    .mockResolvedValueOnce({ ...schedule, params: { topic: "" } });
+  render(<TeacherSchedule accountId="teacher" pipelineId="pipeline" version={2} disabled={false}
+    params={[{ name: "topic", title: "Тема", type: "string", default: "Алгебра" }]} onSessionChange={vi.fn()} />);
+
+  await screen.findByDisplayValue("Дроби");
+  fireEvent.click(screen.getByRole("button", { name: "Тема · сбросить значение" }));
+  expect(screen.getByPlaceholderText("Алгебра")).toBeTruthy();
+  const save = screen.getByRole("button", { name: "Сохранить расписание" });
+  fireEvent.click(save);
+  await screen.findByText("Настройки расписания сохранены.");
+  expect(api.saveSchedule).toHaveBeenLastCalledWith("teacher", "pipeline", {
+    enabled: true, expected_version: 2, params: {},
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Тема · задать пустую строку" }));
+  expect(screen.queryByPlaceholderText("Алгебра")).toBeNull();
+  fireEvent.click(save);
+  await screen.findByText("Настройки расписания сохранены.");
+  expect(api.saveSchedule).toHaveBeenLastCalledWith("teacher", "pipeline", {
+    enabled: true, expected_version: 2, params: { topic: "" },
+  });
+});

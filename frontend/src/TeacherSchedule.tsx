@@ -81,14 +81,30 @@ export function TeacherSchedule({ accountId, pipelineId, version, params, disabl
       <label><input type="checkbox" checked={enabled}
         onChange={(event) => setEnabled(event.target.checked)} /> Включено</label>
       {params.map((param) => {
-        const value = Object.hasOwn(values, param.name) ? values[param.name] : "";
+        const isSet = Object.hasOwn(values, param.name);
+        const value = isSet ? values[param.name] : "";
         const update = (next: string) => setValues((current) => ({ ...current, [param.name]: next }));
+        if (param.type === "string") {
+          const action = isSet ? "Сбросить значение" : "Задать пустую строку";
+          return <div key={param.name} className="pipeline-setting">
+            <label>{param.title}<input value={value}
+              placeholder={!isSet && typeof param.default === "string" ? param.default : undefined}
+              onChange={(event) => update(event.target.value)} /></label>
+            <button type="button" aria-label={`${param.title} · ${action.toLowerCase()}`}
+              onClick={() => setValues((current) => {
+                const next = { ...current };
+                if (Object.hasOwn(next, param.name)) delete next[param.name];
+                else next[param.name] = "";
+                return next;
+              })}>{action}</button>
+          </div>;
+        }
         return <label key={param.name}>{param.title}
           {param.type === "boolean" ? <select value={value} onChange={(event) => update(event.target.value)}>
             <option value="">{param.default == null ? "Выберите значение" : `По умолчанию: ${param.default ? "да" : "нет"}`}</option>
             <option value="true">Да</option>
             <option value="false">Нет</option>
-          </select> : <input type={param.type === "string" ? "text" : "number"}
+          </select> : <input type="number"
             step={param.type === "integer" ? 1 : "any"} value={value}
             placeholder={param.default == null ? undefined : String(param.default)}
             onChange={(event) => update(event.target.value)} />}
